@@ -1,0 +1,41 @@
+# Prefácio {.unnumbered}
+
+Este livro nasceu de uma inquietação prática. Ao longo dos anos em que venho trabalhando com séries temporais em contextos das ciências sociais aplicadas --- economia, finanças, atuária, demografia ---, convivi com dois mundos que raramente se encontram. De um lado, a literatura estatística e atuarial clássica, madura e sistematizada, que ensina ARIMA, suavização exponencial e Lee-Carter com o rigor de décadas de refinamento. De outro, a produção contemporânea em aprendizado de máquina e aprendizado profundo, vertiginosa em ritmo e em escopo, que desloca a fronteira do que é possível prever e modelar a cada novo ano. Entre esses dois mundos, porém, há uma lacuna: poucos materiais guiam o cientista social aplicado brasileiro através da transição entre um e outro --- menos ainda com dados brasileiros, em português, e sem sacrificar o rigor metodológico que a formação estatística clássica cultiva.
+
+Este livro pretende ocupar essa lacuna. É um livro de ponte, não de manifesto: não defende que redes neurais substituam *baselines* estatísticos --- a literatura recente, aliás, demonstra repetidamente o contrário em séries curtas e processos não estacionários típicos das nossas aplicações. Defende, sim, que o profissional moderno precisa dominar as duas tradições e saber quando cada uma serve. A linha que separa uma regressão bem calibrada de uma rede *Transformer* irresponsavelmente treinada é mais fina do que parece, e a diferença entre os dois resultados costuma estar na disciplina metodológica --- particionamento temporal honesto, métricas apropriadas, comparação sistemática contra *baselines*, quantificação rigorosa de incerteza --- muito mais do que na sofisticação da arquitetura escolhida.
+
+## Para quem é este livro
+
+O público imaginado é o cientista social aplicado brasileiro: economistas, atuários, demógrafos, pesquisadores de política pública, gestores de risco, alunos de pós-graduação em economia, atuária, estatística aplicada ou áreas afins. Pressupõe-se familiaridade com álgebra linear elementar, probabilidade e estatística inferencial em nível de graduação, e alguma prática prévia com Python --- nada que um semestre de econometria aplicada não cubra. Não se pressupõe exposição prévia a aprendizado profundo; os conceitos necessários são apresentados na Parte II, com apêndices dedicados a álgebra linear (@sec-apb) e PyTorch (@sec-apc) para quem quiser revisitar fundamentos.
+
+Quem já tem fluência em redes neurais e busca um livro que trate arquiteturas de ponta em profundidade exaustiva encontrará aqui um tratamento mais introdutório; para esse leitor, recomendo complementar com a literatura técnica citada em cada capítulo. Em contrapartida, quem vem da tradição econométrica clássica e deseja entender quando e como Deep Learning agregam valor, sem abandonar o rigor estatístico que aprendeu, encontrará este livro afinado com sua necessidade.
+
+## O que este livro é --- e o que não é
+
+Este livro é um curso aplicado, não uma referência enciclopédica. Cada capítulo apresenta um conjunto coeso de ideias, uma formulação matemática compacta, um estudo de caso com dados brasileiros ou internacionais de relevância reconhecida, e ponteiros para a literatura especializada. Os estudos de caso giram em torno de três conjuntos de dados unificadores --- um painel macroeconômico brasileiro montado a partir do SGS/BCB e do SIDRA/IBGE, a competição M4 como padrão internacional de avaliação, e dados de mortalidade combinando a Human Mortality Database e as Tábuas Completas do IBGE --- de modo que o leitor acompanhe o mesmo conjunto de problemas sendo enfrentado por diferentes classes de modelos, podendo desenvolver intuição sobre o desempenho relativo de cada abordagem.
+
+Não se trata, portanto, de um livro sobre todas as Deep Learning existentes, nem de um tratado sobre séries temporais em toda sua generalidade. Deliberadamente, não aborda séries de altíssima frequência (*tick data*), modelos espaciais-temporais complexos, nem séries causais em sentido estrito de inferência causal com dados observacionais --- cada um desses tópicos merece um livro próprio. O que o livro cobre, cobre com profundidade suficiente para que o leitor possa aplicar com autonomia e julgar com critério; o que não cobre, indica com clareza onde buscar.
+
+## Como usar este livro
+
+Os oito capítulos seguem uma progressão cumulativa. A Parte I --- @sec-cap01 a @sec-cap04 --- estabelece os fundamentos conceituais e metodológicos: por que séries temporais em ciências sociais são diferentes, como avaliar modelos de previsão com rigor, *baselines* estatísticos clássicos e modelos atuariais de projeção de mortalidade. A Parte II --- @sec-cap05 a @sec-cap08 --- apresenta as Deep Learning: *feedforward*, recorrentes, convolucionais temporais e *Transformers*. Cada capítulo depende conceitualmente dos anteriores, e a recomendação é lê-los em ordem em uma primeira passada.
+
+Todos os blocos de código são apresentados no corpo do livro em formato de exibição --- isto é, pensados para serem lidos junto com o texto. A execução de fato ocorre no ambiente Google Colab, com *notebooks* disponíveis no repositório do projeto. Esse fluxo preserva o livro enxuto e permite que os experimentos rodem em hardware gratuito com GPUs adequadas a todos os modelos discutidos. O Apêndice A (@sec-apa) descreve como configurar esse ambiente --- vale uma leitura antes de iniciar o @sec-cap01.
+
+Para o professor que pretenda usar o livro em disciplina de pós-graduação, uma sugestão: a Parte I cobre confortavelmente um curso de sete a oito semanas sobre previsão estatística moderna; a Parte II, outro tanto em um curso subsequente sobre aprendizado profundo aplicado a séries temporais. Os três conjuntos de dados unificadores suportam listas de exercícios e projetos finais que reutilizam código entre capítulos, reduzindo o custo de preparação.
+
+## Uma nota sobre os dados brasileiros
+
+Uma decisão editorial importante vale ser explicitada. A literatura internacional de *forecasting* neural trabalha predominantemente com *benchmarks* como ETT (temperatura de transformadores) ou *datasets* agregados como M4. Para um livro dirigido ao público brasileiro de ciências sociais aplicadas, esses *benchmarks* são inadequados: não ressoam com os problemas que o leitor enfrenta no trabalho cotidiano. Optei, portanto, por privilegiar séries brasileiras legítimas --- IPCA, PIB, Selic, câmbio, desocupação, mortalidade por idade ---, complementadas pelo M4 e pela HMD para assegurar comparabilidade com a literatura internacional. O @sec-apd detalha as fontes, as APIs e os cuidados específicos com cada conjunto.
+
+## Agradecimentos
+
+Um livro técnico é sempre obra coletiva. Agradeço aos colegas e alunos que leram versões preliminares e ajudaram a depurar passagens obscuras, aos revisores anônimos cujas críticas tornaram o texto mais preciso, e às instituições que sustentam o trabalho de pesquisa e ensino em que este livro se apoia. Qualquer erro remanescente é, naturalmente, de minha inteira responsabilidade --- e o leitor é convidado a relatá-lo no repositório do projeto, onde correções são acolhidas com gratidão.
+
+Finalmente, um agradecimento à família, pela paciência com os fins de semana em que o livro competiu por atenção --- e por lembrar, sempre, que previsão é um ofício, mas não o único.
+
+---
+
+João Pessoa, 2026
+
+Filipe Duarte

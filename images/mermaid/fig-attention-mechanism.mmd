@@ -1,0 +1,35 @@
+graph LR
+    subgraph Entradas["Entradas"]
+        Q["Query Q"]
+        K["Key K"]
+        V["Value V"]
+    end
+    
+    subgraph Atencao["Atencao Escalada"]
+        direction TB
+        M1["MatMul"]
+        SCALE["Divide por sqrt(dk)"]
+        SOFT["Softmax"]
+        M2["MatMul"]
+    end
+    
+    subgraph Saida["Saida"]
+        OUT["Output"]
+    end
+    
+    Q --> M1
+    K --> M1
+    M1 --> SCALE
+    SCALE --> SOFT
+    V --> M2
+    SOFT --> M2
+    M2 --> OUT
+    
+    style Q fill:#e3f2fd
+    style K fill:#e3f2fd
+    style V fill:#e3f2fd
+    style M1 fill:#fff3e0
+    style SCALE fill:#fff3e0
+    style SOFT fill:#fff3e0
+    style M2 fill:#fff3e0
+    style OUT fill:#e8f5e9

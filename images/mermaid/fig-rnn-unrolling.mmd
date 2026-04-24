@@ -1,0 +1,37 @@
+graph LR
+    subgraph Visao_Compacta["Visao Compacta"]
+        X["x(t)"] --> CELL{"RNN Cell"}
+        H_PREV["h(t-1)"] --> CELL
+        CELL --> H_CURR["h(t)"]
+        CELL --> Y["y(t)"]
+        H_CURR -.->|"realimentacao"| CELL
+    end
+    
+    subgraph Desenrolada["Desenrolada no Tempo"]
+        direction LR
+        
+        X1["x1"] --> R1["RNN"]
+        H0["h0 inicial"] --> R1
+        R1 --> H1["h1"]
+        R1 --> Y1["y1"]
+        
+        X2["x2"] --> R2["RNN"]
+        H1 -->|"compartilhado"| R2
+        R2 --> H2["h2"]
+        R2 --> Y2["y2"]
+        
+        X3["x3"] --> R3["RNN"]
+        H2 -->|"compartilhado"| R3
+        R3 --> H3["h3"]
+        R3 --> Y3["y3"]
+        
+        X4["x4"] --> R4["RNN"]
+        H3 -->|"compartilhado"| R4
+        R4 --> H4["h4"]
+        R4 --> Y4["y4"]
+        
+        style R1 fill:#90caf9
+        style R2 fill:#90caf9
+        style R3 fill:#90caf9
+        style R4 fill:#90caf9
+    end

@@ -1,0 +1,59 @@
+graph TD
+    subgraph Camada_Entrada["Camada de Entrada"]
+        X1["x1"]
+        X2["x2"]
+        X3["x3"]
+        XDOTS["..."]
+        XN["xn"]
+    end
+    
+    subgraph Oculta1["Camada Oculta 1"]
+        H11["ReLU"]
+        H12["ReLU"]
+        H13["ReLU"]
+        H1DOTS["..."]
+    end
+    
+    subgraph Oculta2["Camada Oculta 2"]
+        H21["ReLU"]
+        H22["ReLU"]
+        H2DOTS["..."]
+    end
+    
+    subgraph Camada_Saida["Camada de Saida"]
+        OUT["y_pred"]
+    end
+    
+    X1 --> H11
+    X1 --> H12
+    X1 --> H13
+    X2 --> H11
+    X2 --> H12
+    X2 --> H13
+    X3 --> H11
+    X3 --> H12
+    X3 --> H13
+    XN --> H11
+    XN --> H12
+    XN --> H13
+    
+    H11 --> H21
+    H11 --> H22
+    H12 --> H21
+    H12 --> H22
+    H13 --> H21
+    H13 --> H22
+    
+    H21 --> OUT
+    H22 --> OUT
+    
+    style X1 fill:#e3f2fd
+    style X2 fill:#e3f2fd
+    style X3 fill:#e3f2fd
+    style XN fill:#e3f2fd
+    style H11 fill:#fff3e0
+    style H12 fill:#fff3e0
+    style H13 fill:#fff3e0
+    style H21 fill:#fff3e0
+    style H22 fill:#fff3e0
+    style OUT fill:#e8f5e9

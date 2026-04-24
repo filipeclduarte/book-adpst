@@ -1,0 +1,133 @@
+# Revisão de Álgebra Linear para Séries Temporais {.appendix #sec-apb}
+
+Este apêndice recupera, de forma pragmática, os conceitos de álgebra linear necessários para seguir o livro. O objetivo não é substituir um curso regular da disciplina --- para isso, @strang2016introduction e @axler2015linear são referências padrão ---, mas garantir que o leitor reconheça as operações que aparecem nos capítulos anteriores: o produto matriz-vetor por trás de uma camada *feedforward*, o SVD que sustenta o modelo Lee-Carter, os autovalores que controlam a estabilidade de uma RNN, as derivadas matriciais que justificam o algoritmo de retropropagação. Cada seção explicita onde o conceito aparece no livro e em que nível de profundidade ele é exigido.
+
+::: {.callout-note}
+## Leituras para aprofundamento
+
+Três referências cobrem progressivamente o material deste apêndice. @boyd2018introduction é o mais acessível e privilegia a intuição geométrica, adequado a quem teve contato limitado com ÁL. @strang2016introduction é o clássico didático, equilibrando teoria e aplicações, e sua versão focada em ciência de dados [@strang2019linear] traz capítulos dedicados a SVD e mínimos quadrados. Para um tratamento formal e numericamente rigoroso, @trefethen1997numerical e @golub2013matrix são as referências profissionais; @petersen2012matrix é o *Matrix Cookbook*, manual de identidades úteis para cálculo de derivadas matriciais.
+:::
+
+## Vetores, normas e produto interno
+
+Um **vetor** $\mathbf{x} \in \mathbb{R}^n$ é uma tupla ordenada de $n$ números reais $(x_1, x_2, \ldots, x_n)$. Em séries temporais, o caso mais comum é um vetor de defasagens, $\mathbf{x}_t = (y_{t-1}, y_{t-2}, \ldots, y_{t-p})$, que alimenta um modelo preditivo como as MLPs do @sec-cap05. Operações fundamentais são a soma elemento-a-elemento, $\mathbf{x} + \mathbf{y}$, e a multiplicação por escalar, $\alpha \mathbf{x}$. O espaço $\mathbb{R}^n$ é fechado sob essas operações, o que formaliza a noção de "combinação linear" $\alpha \mathbf{x} + \beta \mathbf{y}$.
+
+O **produto interno** (ou escalar) é a operação que liga pares de vetores a números reais:
+
+$$
+\langle \mathbf{x}, \mathbf{y} \rangle = \mathbf{x}^\top \mathbf{y} = \sum_{i=1}^{n} x_i y_i.
+$$
+
+Sua interpretação geométrica é a projeção de um vetor sobre o outro, $\langle \mathbf{x}, \mathbf{y} \rangle = \|\mathbf{x}\| \|\mathbf{y}\| \cos \theta$, onde $\theta$ é o ângulo entre eles. Vetores ortogonais satisfazem $\langle \mathbf{x}, \mathbf{y} \rangle = 0$ --- uma propriedade que recupera, por exemplo, a ausência de correlação linear entre componentes principais em PCA.
+
+A **norma** mede o "tamanho" de um vetor. As três normas usadas recorrentemente no livro são:
+
+$$
+\|\mathbf{x}\|_1 = \sum_i |x_i|, \quad
+\|\mathbf{x}\|_2 = \sqrt{\sum_i x_i^2}, \quad
+\|\mathbf{x}\|_\infty = \max_i |x_i|.
+$$
+
+A norma $\ell_2$ (euclidiana) é a padrão em regressão e em redes neurais, induzindo o RMSE do @sec-cap02; a $\ell_1$ (Manhattan) induz o MAE, mais robusto a *outliers*, e aparece como regularizador em LASSO; a $\ell_\infty$ surge em métricas de pior caso. A desigualdade de Cauchy-Schwarz $|\langle \mathbf{x}, \mathbf{y} \rangle| \leq \|\mathbf{x}\|_2 \|\mathbf{y}\|_2$ é o resultado técnico que sustenta várias demonstrações de consistência estatística.
+
+## Matrizes e operações
+
+Uma **matriz** $\mathbf{A} \in \mathbb{R}^{m \times n}$ é um arranjo retangular de números com $m$ linhas e $n$ colunas. Em séries temporais, matrizes aparecem como painéis de dados (linhas = observações, colunas = variáveis), como matrizes de pesos em redes neurais e como matrizes de covariância em modelos multivariados do @sec-cap04.
+
+O **produto matriz-vetor** $\mathbf{A} \mathbf{x}$ produz um vetor em $\mathbb{R}^m$ cuja $i$-ésima entrada é $(\mathbf{A} \mathbf{x})_i = \sum_{j=1}^n A_{ij} x_j$. Duas interpretações são essenciais. Na **interpretação por linhas**, cada entrada é o produto interno entre uma linha de $\mathbf{A}$ e o vetor $\mathbf{x}$; esta é a visão que naturalmente aparece em regressão linear, onde cada linha representa uma observação. Na **interpretação por colunas**, $\mathbf{A} \mathbf{x}$ é uma combinação linear das colunas de $\mathbf{A}$ com coeficientes dados por $\mathbf{x}$; esta é a visão que revela por que o espaço das saídas alcançáveis é justamente o espaço coluna de $\mathbf{A}$.
+
+O **produto matricial** $\mathbf{A} \mathbf{B}$ exige compatibilidade dimensional: se $\mathbf{A} \in \mathbb{R}^{m \times n}$ e $\mathbf{B} \in \mathbb{R}^{n \times p}$, então $\mathbf{A} \mathbf{B} \in \mathbb{R}^{m \times p}$. Multiplicação matricial **não é comutativa** ($\mathbf{A} \mathbf{B} \neq \mathbf{B} \mathbf{A}$ em geral), mas é **associativa** ($(\mathbf{A} \mathbf{B}) \mathbf{C} = \mathbf{A} (\mathbf{B} \mathbf{C})$) e **distributiva** sobre a soma. A não-comutatividade é a razão pela qual a ordem das camadas em uma rede neural importa e não pode ser trocada arbitrariamente.
+
+A **transposta** $\mathbf{A}^\top$ troca linhas por colunas, $(\mathbf{A}^\top)_{ij} = A_{ji}$. Propriedades úteis: $(\mathbf{A} \mathbf{B})^\top = \mathbf{B}^\top \mathbf{A}^\top$ e $(\mathbf{A}^\top)^\top = \mathbf{A}$. Uma matriz é **simétrica** quando $\mathbf{A} = \mathbf{A}^\top$; matrizes de covariância e de correlação são sempre simétricas, uma propriedade que se traduz em autovalores reais e autovetores ortogonais.
+
+## Sistemas lineares e mínimos quadrados
+
+O problema central da álgebra linear aplicada é resolver $\mathbf{A} \mathbf{x} = \mathbf{b}$ para $\mathbf{x}$. Três cenários emergem conforme as dimensões de $\mathbf{A}$. Quando $\mathbf{A}$ é quadrada e invertível, existe solução única $\mathbf{x} = \mathbf{A}^{-1} \mathbf{b}$; na prática, raramente calculamos $\mathbf{A}^{-1}$ explicitamente, pois decomposições como LU ou Cholesky são numericamente mais estáveis. Quando o sistema é **sobredeterminado** ($m > n$, mais equações que incógnitas), geralmente não existe $\mathbf{x}$ que satisfaça todas as equações; buscamos então o vetor que minimiza $\|\mathbf{A} \mathbf{x} - \mathbf{b}\|_2^2$. Quando o sistema é **subdeterminado** ($m < n$), existem infinitas soluções, e precisamos de um critério adicional --- tipicamente a solução de menor norma --- para escolher uma.
+
+O caso sobredeterminado é o **problema dos mínimos quadrados**, pedra angular da econometria clássica e ponto de partida dos modelos do @sec-cap04. A solução fechada, conhecida como **equações normais**, é:
+
+$$
+\hat{\boldsymbol{\beta}} = (\mathbf{X}^\top \mathbf{X})^{-1} \mathbf{X}^\top \mathbf{y}.
+$$
+
+Aqui $\mathbf{X} \in \mathbb{R}^{n \times p}$ é a matriz de regressores (linhas são observações, colunas são variáveis), $\mathbf{y} \in \mathbb{R}^n$ é o vetor de respostas, e $\hat{\boldsymbol{\beta}} \in \mathbb{R}^p$ é o vetor de coeficientes estimados. A derivação parte de $\nabla_{\boldsymbol{\beta}} \|\mathbf{y} - \mathbf{X}\boldsymbol{\beta}\|_2^2 = \mathbf{0}$, condição de primeira ordem para o mínimo. A interpretação geométrica é transparente: $\hat{\mathbf{y}} = \mathbf{X} \hat{\boldsymbol{\beta}}$ é a projeção ortogonal de $\mathbf{y}$ sobre o espaço coluna de $\mathbf{X}$, de modo que o resíduo $\mathbf{y} - \hat{\mathbf{y}}$ é ortogonal a todas as colunas de $\mathbf{X}$.
+
+Computacionalmente, a resolução via inversão de $\mathbf{X}^\top \mathbf{X}$ é desaconselhada quando a matriz é mal-condicionada; decomposições QR ou SVD fornecem soluções numericamente estáveis, e são os algoritmos usados internamente por `numpy.linalg.lstsq` e `statsmodels.OLS`.
+
+## Posto, independência linear e espaços fundamentais
+
+A **independência linear** de um conjunto de vetores $\{\mathbf{v}_1, \ldots, \mathbf{v}_k\}$ significa que nenhum deles pode ser escrito como combinação linear dos demais; equivalentemente, $\sum_i c_i \mathbf{v}_i = \mathbf{0}$ implica $c_i = 0$ para todo $i$. O **posto** (*rank*) de uma matriz é o número máximo de colunas linearmente independentes, que coincide com o número máximo de linhas linearmente independentes.
+
+Posto incompleto sinaliza redundância: se $\mathbf{X}$ tem duas colunas perfeitamente correlacionadas, seu posto é menor que o número de colunas, e as equações normais falham porque $\mathbf{X}^\top \mathbf{X}$ é singular. Em regressão, esse é o fenômeno da **multicolinearidade perfeita**; em dados reais, enfrentamos geralmente multicolinearidade imperfeita, em que $\mathbf{X}^\top \mathbf{X}$ é invertível mas mal-condicionada, inflacionando a variância dos estimadores. Ridge regression adiciona $\lambda \mathbf{I}$ a essa matriz, garantindo invertibilidade ao preço de viés --- uma troca explicitada em @goodfellow2016deep.
+
+Os **quatro espaços fundamentais** de uma matriz $\mathbf{A} \in \mathbb{R}^{m \times n}$ são o espaço coluna $C(\mathbf{A}) \subseteq \mathbb{R}^m$, o espaço nulo $N(\mathbf{A}) \subseteq \mathbb{R}^n$, o espaço linha $C(\mathbf{A}^\top) \subseteq \mathbb{R}^n$ e o espaço nulo esquerdo $N(\mathbf{A}^\top) \subseteq \mathbb{R}^m$. O **teorema fundamental da álgebra linear** estabelece que $C(\mathbf{A}^\top)$ e $N(\mathbf{A})$ são ortogonais e juntos geram $\mathbb{R}^n$; analogamente para $C(\mathbf{A})$ e $N(\mathbf{A}^\top)$ em $\mathbb{R}^m$. Essa decomposição ortogonal é a base geométrica da resolução de mínimos quadrados.
+
+## Autovalores e autovetores
+
+Um **autovetor** de uma matriz quadrada $\mathbf{A}$ é um vetor não-nulo $\mathbf{v}$ tal que $\mathbf{A} \mathbf{v} = \lambda \mathbf{v}$ para algum escalar $\lambda$, chamado **autovalor** associado. Geometricamente, $\mathbf{v}$ é uma direção preservada pela transformação: $\mathbf{A}$ apenas escala $\mathbf{v}$ pelo fator $\lambda$ sem alterar sua direção. Os autovalores são as raízes do polinômio característico $\det(\mathbf{A} - \lambda \mathbf{I}) = 0$.
+
+Autovalores governam a **estabilidade dinâmica** de sistemas lineares. Considere a recursão $\mathbf{h}_{t+1} = \mathbf{W} \mathbf{h}_t$ --- a versão linearizada de uma RNN sem função de ativação e sem entrada. Iterando, $\mathbf{h}_t = \mathbf{W}^t \mathbf{h}_0$. Se todos os autovalores de $\mathbf{W}$ tiverem módulo menor que 1, $\mathbf{h}_t \to \mathbf{0}$ (gradientes que desaparecem); se algum autovalor tiver módulo maior que 1, $\mathbf{h}_t$ diverge (gradientes que explodem). Essa é a raiz matemática do problema discutido no @sec-cap06 e motiva arquiteturas como LSTM e GRU, desenhadas para manter autovalores próximos de 1 no caminho do estado de célula.
+
+Em séries temporais lineares, autovalores da matriz companheira de um AR($p$) determinam a **estacionariedade**: o processo é estacionário se e somente se todos os autovalores têm módulo menor que 1, condição equivalente a raízes do polinômio autorregressivo fora do círculo unitário no plano complexo. Esse é o conteúdo do teste de Dickey-Fuller e de seu irmão aumentado (ADF), discutidos no @sec-cap03 e @sec-cap04.
+
+Matrizes simétricas têm duas propriedades especiais: todos os autovalores são reais, e existe uma base ortonormal de autovetores. Isso permite a **decomposição espectral**:
+
+$$
+\mathbf{A} = \mathbf{Q} \boldsymbol{\Lambda} \mathbf{Q}^\top,
+$$
+
+onde $\mathbf{Q}$ é ortogonal (colunas são autovetores ortonormais) e $\boldsymbol{\Lambda}$ é diagonal (autovalores). Como matrizes de covariância são simétricas, PCA é efetivamente essa decomposição aplicada à matriz de covariância dos dados.
+
+## Decomposição em valores singulares (SVD)
+
+A SVD generaliza a decomposição espectral para matrizes retangulares, e é a ferramenta mais importante deste apêndice para o livro. Para qualquer $\mathbf{A} \in \mathbb{R}^{m \times n}$:
+
+$$
+\mathbf{A} = \mathbf{U} \boldsymbol{\Sigma} \mathbf{V}^\top,
+$$
+
+onde $\mathbf{U} \in \mathbb{R}^{m \times m}$ e $\mathbf{V} \in \mathbb{R}^{n \times n}$ são ortogonais, e $\boldsymbol{\Sigma} \in \mathbb{R}^{m \times n}$ é "diagonal" com entradas $\sigma_1 \geq \sigma_2 \geq \cdots \geq 0$ chamadas **valores singulares**. As colunas de $\mathbf{U}$ são **vetores singulares esquerdos** e as de $\mathbf{V}$ são **vetores singulares direitos**. O número de valores singulares não nulos é o posto de $\mathbf{A}$.
+
+A SVD sustenta o modelo Lee-Carter do @sec-cap04. Lá, a matriz de log-taxas de mortalidade centralizada $\tilde{\mathbf{M}} = \log \mathbf{M} - \bar{\mathbf{a}} \mathbf{1}^\top$ é decomposta via SVD, e a primeira componente $\sigma_1 \mathbf{u}_1 \mathbf{v}_1^\top$ fornece diretamente as estimativas de $b_x$ (dado por $\mathbf{u}_1$) e $k_t$ (dado por $\sigma_1 \mathbf{v}_1$). A elegância do método é a consequência direta do **teorema de Eckart-Young**: a melhor aproximação de posto $k$ para $\mathbf{A}$ na norma de Frobenius é obtida truncando a SVD nos $k$ maiores valores singulares.
+
+A SVD também fundamenta PCA. Se $\mathbf{X}$ é a matriz de dados centralizada, então as direções de máxima variância são os vetores singulares direitos de $\mathbf{X}$, os valores singulares ao quadrado (divididos por $n-1$) são as variâncias explicadas por cada componente, e as projeções dos dados sobre as componentes principais são as colunas de $\mathbf{U} \boldsymbol{\Sigma}$. A LCConv multipopulacional do @sec-cap07 pode ser vista, em sua versão linearizada, como uma generalização não-linear desse mesmo esquema.
+
+Numericamente, a SVD é estável mesmo para matrizes mal-condicionadas, e é o método recomendado para resolver mínimos quadrados em *software* profissional. A **pseudo-inversa de Moore-Penrose** $\mathbf{A}^+ = \mathbf{V} \boldsymbol{\Sigma}^+ \mathbf{U}^\top$ (com $\boldsymbol{\Sigma}^+$ obtida invertendo os valores singulares não-nulos) generaliza a noção de inversa e fornece a solução de menor norma para sistemas subdeterminados.
+
+## Normas matriciais e condicionamento
+
+Assim como vetores, matrizes têm normas. A **norma de Frobenius** é análoga à $\ell_2$ para vetores:
+
+$$
+\|\mathbf{A}\|_F = \sqrt{\sum_{i,j} A_{ij}^2} = \sqrt{\sum_i \sigma_i^2}.
+$$
+
+As **normas induzidas** $\|\mathbf{A}\|_p = \sup_{\mathbf{x} \neq 0} \|\mathbf{A}\mathbf{x}\|_p / \|\mathbf{x}\|_p$ medem o maior fator de expansão que $\mathbf{A}$ aplica a vetores. A norma espectral $\|\mathbf{A}\|_2$ coincide com o maior valor singular $\sigma_1$, e controla, por exemplo, a taxa de expansão de gradientes em uma rede neural.
+
+O **número de condição** $\kappa(\mathbf{A}) = \sigma_1 / \sigma_n$ (razão entre maior e menor valor singular) quantifica a sensibilidade numérica de $\mathbf{A} \mathbf{x} = \mathbf{b}$ a perturbações: um $\kappa$ grande significa que pequenas alterações em $\mathbf{b}$ podem produzir grandes alterações em $\mathbf{x}$. Em regressão, $\kappa(\mathbf{X}^\top \mathbf{X})$ quantifica a multicolinearidade; valores acima de $10^6$ sinalizam que os coeficientes estimados não devem ser interpretados individualmente sem cautela.
+
+## Derivadas matriciais e retropropagação
+
+O treinamento de redes neurais exige calcular gradientes da função de perda em relação a matrizes de pesos. As identidades abaixo, coletadas em @petersen2012matrix, cobrem quase todos os casos encontrados no livro:
+
+$$
+\nabla_{\mathbf{x}} (\mathbf{a}^\top \mathbf{x}) = \mathbf{a}, \qquad
+\nabla_{\mathbf{x}} (\mathbf{x}^\top \mathbf{A} \mathbf{x}) = (\mathbf{A} + \mathbf{A}^\top) \mathbf{x}.
+$$
+
+Para a forma quadrática dos mínimos quadrados, $\mathcal{L}(\boldsymbol{\beta}) = \|\mathbf{y} - \mathbf{X}\boldsymbol{\beta}\|_2^2 = \mathbf{y}^\top \mathbf{y} - 2 \mathbf{y}^\top \mathbf{X} \boldsymbol{\beta} + \boldsymbol{\beta}^\top \mathbf{X}^\top \mathbf{X} \boldsymbol{\beta}$, obtemos $\nabla_{\boldsymbol{\beta}} \mathcal{L} = -2 \mathbf{X}^\top \mathbf{y} + 2 \mathbf{X}^\top \mathbf{X} \boldsymbol{\beta}$. Igualando a zero, recuperamos as equações normais.
+
+A **regra da cadeia matricial** é a espinha dorsal da retropropagação. Se $\mathbf{z}^{[\ell]} = \mathbf{W}^{[\ell]} \mathbf{a}^{[\ell-1]} + \mathbf{b}^{[\ell]}$ e $\mathbf{a}^{[\ell]} = f(\mathbf{z}^{[\ell]})$, então:
+
+$$
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{[\ell]}} = \boldsymbol{\delta}^{[\ell]} (\mathbf{a}^{[\ell-1]})^\top, \qquad
+\boldsymbol{\delta}^{[\ell-1]} = (\mathbf{W}^{[\ell]})^\top \boldsymbol{\delta}^{[\ell]} \odot f'(\mathbf{z}^{[\ell-1]}),
+$$
+
+onde $\boldsymbol{\delta}^{[\ell]} = \partial \mathcal{L} / \partial \mathbf{z}^{[\ell]}$ e $\odot$ denota produto de Hadamard. Essa recursão computa todos os gradientes em complexidade proporcional à de um *forward pass*, e é a razão pela qual redes profundas são treináveis em primeiro lugar.
+
+## Do papel ao código: notação e PyTorch
+
+A transição da notação matemática para o código PyTorch --- usado ao longo da Parte II --- segue convenções precisas que vale a pena fixar. Um vetor $\mathbf{x} \in \mathbb{R}^n$ é representado por `torch.Tensor` de formato `(n,)`; uma matriz $\mathbf{A} \in \mathbb{R}^{m \times n}$, por um tensor `(m, n)`. Em aplicações práticas, porém, quase sempre trabalhamos com **batches**: um lote de $B$ vetores de entrada é um tensor `(B, n)`, e a camada linear $\mathbf{y} = \mathbf{W} \mathbf{x} + \mathbf{b}$ é codificada como `y = x @ W.T + b` (em PyTorch, `nn.Linear(n, m)` armazena $\mathbf{W}$ com formato `(m, n)` e faz internamente o produto de forma vetorizada sobre o batch).
+
+Para séries temporais, o formato canônico das RNNs no PyTorch é `(B, T, n)` com `batch_first=True`: batch, tempo, *features*. Convoluções 1D, por contraste, esperam `(B, n, T)` --- canais antes do eixo temporal ---, e esquecer essa inversão é a fonte mais comum de bugs silenciosos na transição entre capítulos 06 e 07. As operações matriciais fundamentais correspondem diretamente: `torch.matmul(A, x)` para $\mathbf{A}\mathbf{x}$, `A.T @ A` para $\mathbf{A}^\top \mathbf{A}$, `torch.linalg.svd(A)` para a SVD, `torch.linalg.eigh(A)` para a decomposição espectral de matrizes simétricas. Toda a cadeia de gradientes discutida na seção anterior é automatizada pelo `autograd`, mas compreender a matemática subjacente é o que permite diagnosticar comportamentos anômalos --- explosão de gradientes, *dead neurons*, treinos que não convergem --- e corrigi-los com propriedade.

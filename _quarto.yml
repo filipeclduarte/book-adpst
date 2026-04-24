@@ -1,0 +1,165 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "Análise de Dados e Previsão de Séries Temporais"
+  subtitle: "Métodos Quantitativos Modernos para Ciências Sociais Aplicadas — Fundamentos e Deep Learning com Python"
+  author:
+    - name: "Filipe Coelho de Lima Duarte"
+      url: https://github.com/filipeclduarte
+      affiliation: "Universidade Federal da Paraíba (UFPB)"
+      orcid: # add your ORCID
+  date: today
+  date-format: "MMMM YYYY"
+  reader-mode: true
+  repo-url: https://github.com/filipeclduarte/book-adpst
+  repo-actions: [edit, issue]
+  repo-branch: main
+  sharing: [twitter, linkedin]
+  search: true
+  downloads: [pdf, epub, docx]
+  
+  sidebar:
+    style: docked
+    background: light
+  
+  chapters:
+    - index.qmd
+    - chapters/prefacio.qmd
+    
+    - part: "Parte I — Fundamentos e Métodos Clássicos"
+      chapters:
+        - chapters/01-series-temporais-ciencias-sociais.qmd
+        - chapters/02-avaliacao-rigorosa.qmd
+        - chapters/03-baselines-estatisticos.qmd
+        - chapters/04-modelos-econometricos-atuariais.qmd
+    
+    - part: "Parte II — Deep Learning para Séries Temporais"
+      chapters:
+        - chapters/05-feedforward-simplicidade.qmd
+        - chapters/06-redes-recorrentes.qmd
+        - chapters/07-convolucoes-temporais.qmd
+        - chapters/08-transformers.qmd
+    
+    - part: "Apêndices"
+      chapters:
+        - chapters/apendice-a-setup.qmd
+        - chapters/apendice-b-algebra-linear.qmd
+        - chapters/apendice-c-revisao-pytorch.qmd
+        - chapters/apendice-d-dados-brasileiros.qmd
+    
+    - chapters/referencias.qmd
+
+bibliography: bibliography/references.bib
+csl: bibliography/apa.csl
+
+lang: pt-BR
+
+format:
+  # ---- WEBSITE (GitHub Pages) ----
+  html:
+    theme:
+      light: [cosmo, custom.scss]
+      dark: [darkly, custom-dark.scss]
+    code-link: true
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    highlight-style: github
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    number-depth: 3
+    fig-cap-location: bottom
+    reference-location: margin
+    mermaid:
+      theme: default
+  
+  # ---- DOCX (Submissão Editora UFPB) ----
+  # Passo 1: Gerar template base:
+  #   quarto pandoc -o template-ufpb.docx --print-default-data-file reference.docx
+  #
+  # Passo 2: Abrir template-ufpb.docx no Word/LibreOffice e configurar:
+  #   - Layout > Tamanho: A5 (148mm x 210mm)
+  #   - Margens: Superior=3cm, Inferior=2cm, Esquerda=3cm, Direita=2cm
+  #   - Fonte corpo: Times New Roman 12pt (ou conforme edital UFPB)
+  #   - Espacamento entre linhas: 1.5
+  #   - Estilos Heading 1, 2, 3 conforme ABNT
+  #   - Salvar
+  #
+  # Passo 3: quarto render --to docx
+  docx:
+    reference-doc: template-ufpb.docx
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    highlight-style: github
+    fig-width: 5
+    fig-height: 3.5
+    
+  # ---- PDF (Amazon KDP 6x9) ----
+  pdf:
+    documentclass: scrbook
+    papersize: "6in:9in"
+    geometry:
+      - top=0.75in
+      - bottom=0.75in
+      - left=0.75in
+      - right=0.75in
+    fontsize: 11pt
+    mainfont: "Latin Modern Roman"
+    monofont: "Fira Code"
+    monofontoptions: "Scale=0.8"
+    code-block-bg: "#f5f5f5"
+    colorlinks: true
+    linkcolor: "blue"
+    keep-tex: true
+    include-in-header:
+      text: |
+        \usepackage{fvextra}
+        \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+          showspaces=false,
+          showtabs=false,
+          breaklines,
+          commandchars=\\\{\}
+        }
+    
+  # ---- EPUB (Leanpub / Kindle / Gumroad) ----
+  epub:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    epub-cover-image: images/capa.png
+
+# ============================================================
+# EXECUCAO DE CODIGO
+# ============================================================
+# 
+# WORKFLOW: Google Colab + Quarto
+#
+# OPCAO A - Notebooks .ipynb diretos (mais simples)
+#   1. Escrever/executar codigo no Google Colab
+#   2. Salvar o .ipynb (File > Download > .ipynb)
+#   3. Colocar o .ipynb na pasta chapters/
+#   4. Referenciar no _quarto.yml:
+#        - chapters/07-convolucoes-temporais.ipynb
+#   5. quarto render gera HTML/PDF/DOCX com codigo + outputs do Colab
+#
+# OPCAO B - .qmd com outputs pre-computados (mais controle editorial)
+#   1. Executar codigo no Colab, salvar outputs (figuras .png, tabelas .csv)
+#   2. Download dos outputs para images/ e data/
+#   3. No .qmd, blocos com eval: false (mostra codigo, nao executa)
+#   4. Logo abaixo, incluir a figura salva com ![](images/fig.png)
+#
+# OPCAO C - freeze (executa localmente uma vez, congela outputs)
+#   1. Escrever codigo nos .qmd
+#   2. quarto render (roda Python, gera outputs)
+#   3. Commitar _freeze/ no Git
+#   4. Renders futuros usam outputs congelados
+#
+execute:
+  eval: false
+  echo: true
+  warning: false
+  message: false

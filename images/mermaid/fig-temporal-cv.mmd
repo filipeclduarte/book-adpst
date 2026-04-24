@@ -1,0 +1,48 @@
+graph TB
+    subgraph Serie_Temporal["Serie Temporal"]
+        direction LR
+        S1["t=1"] --- S2["t=2"] --- S3["t=3"] --- S4["t=4"] --- S5["t=5"] --- S6["t=6"] --- S7["t=7"] --- S8["t=8"] --- S9["t=9"] --- S10["t=10"] --- S11["t=11"] --- S12["t=12"]
+    end
+    
+    subgraph Janela_Expansiva["Janela Expansiva"]
+        direction TB
+        
+        E1["Dobra 1"]
+        E1_TREINO["Treino: t=1-6"] --> E1_TESTE["Teste: t=7-8"]
+        
+        E2["Dobra 2"]
+        E2_TREINO["Treino: t=1-8"] --> E2_TESTE["Teste: t=9-10"]
+        
+        E3["Dobra 3"]
+        E3_TREINO["Treino: t=1-10"] --> E3_TESTE["Teste: t=11-12"]
+        
+        NOTE_EXP["O treino cresce a cada dobra"]
+    end
+    
+    subgraph Janela_Deslizante["Janela Deslizante"]
+        direction TB
+        
+        R1["Dobra 1"]
+        R1_TREINO["Treino: t=1-6"] --> R1_TESTE["Teste: t=7-8"]
+        
+        R2["Dobra 2"]
+        R2_TREINO["Treino: t=3-8"] --> R2_TESTE["Teste: t=9-10"]
+        
+        R3["Dobra 3"]
+        R3_TREINO["Treino: t=5-10"] --> R3_TESTE["Teste: t=11-12"]
+        
+        NOTE_ROL["O treino mantem tamanho fixo w=6"]
+    end
+    
+    style E1_TREINO fill:#bbdefb
+    style E2_TREINO fill:#bbdefb
+    style E3_TREINO fill:#bbdefb
+    style R1_TREINO fill:#bbdefb
+    style R2_TREINO fill:#bbdefb
+    style R3_TREINO fill:#bbdefb
+    style E1_TESTE fill:#fff9c4
+    style E2_TESTE fill:#fff9c4
+    style E3_TESTE fill:#fff9c4
+    style R1_TESTE fill:#fff9c4
+    style R2_TESTE fill:#fff9c4
+    style R3_TESTE fill:#fff9c4

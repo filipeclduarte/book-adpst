@@ -1,0 +1,602 @@
+# Transformers para Séries Temporais: Mecanismos de Atenção {#sec-cap08}
+
+As redes recorrentes do Capítulo 6, embora poderosas, processam sequências iterativamente, limitando o paralelismo e dificultando a captura de dependências de muito longo prazo. A arquitetura **Transformer**, originalmente proposta para tradução automática [@vaswani2017attention], revolucionou o processamento de sequências ao substituir a recorrência por mecanismos de **atenção** (*attention*).
+
+A inovação central é simples mas poderosa: em vez de comprimir toda a história em um estado oculto fixo, o modelo aprende a "atentar" seletivamente para diferentes partes da sequência de entrada quando produz cada elemento da saída. Isso permite dependências diretas entre posições distantes, independentemente de sua separação temporal, e possibilita processamento massivamente paralelizável durante o treinamento.
+
+Este capítulo apresenta o Transformer adaptado para séries temporais, com aplicação prática em previsão de taxas de mortalidade, seguindo o estudo de @wang2024timeseries que demonstra como a arquitetura original de Vaswani pode ser efetivamente aplicada a dados demográficos.
+
+## O Mecanismo de Atenção
+
+A operação fundamental de atenção mapeia uma consulta (*query*) e um conjunto de pares chave-valor (*key-value*) para uma saída. A saída é computada como uma soma ponderada dos valores, onde o peso atribuído a cada valor é determinado pela compatibilidade entre a consulta e a chave correspondente.
+
+### Atenção Escalada por Produto de Ponto
+
+O Transformer utiliza **atenção multi-cabeça** (*multi-head attention*), onde múltiplas projeções paralelas permitem que o modelo atente para diferentes representações em diferentes posições. Para uma única "cabeça":
+
+$$
+\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}}\right)\mathbf{V}
+$$
+
+Onde $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$ são matrizes de *query*, *key* e *value*, respectivamente, e $d_k$ é a dimensionalidade das chaves. O fator de escala $\sqrt{d_k}$ evita que os produtos de ponto cresçam excessivamente em dimensionalidades altas, o que empurraria a função softmax para regiões de gradiente muito pequeno.
+
+A função softmax normaliza os pesos para que somem 1, criando uma distribuição de probabilidade sobre as posições a serem atentadas. Valores mais altos de compatibilidade entre *query* e *key* resultam em maiores pesos para o *value* correspondente.
+
+### Atenção Multi-Cabeça
+
+Em vez de uma única função de atenção, o modelo projetada linearmente as consultas, chaves e valores $h$ vezes com projeções diferentes, executa atenção em paralelo em cada versão projetada, e concatena os resultados:
+
+$$
+\text{MultiHead}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h)\mathbf{W}^O
+$$
+
+$$
+\text{head}_i = \text{Attention}(\mathbf{Q}\mathbf{W}_i^Q, \mathbf{K}\mathbf{W}_i^K, \mathbf{V}\mathbf{W}_i^V)
+$$
+
+Diferentes cabeças podem aprender diferentes tipos de dependências — uma pode focar em padrões sazonais de curto prazo, outra em tendências de longo prazo, outra em comportamento recente. A @fig-attention-mechanism ilustra o mecanismo de atenção escalar por produto de ponto.
+
+![Mecanismo de atenção escalar por produto de ponto. As entradas Query (Q), Key (K) e Value (V) são projetadas linearmente a partir da sequência de entrada. Q e K são multiplicadas para obter scores de compatibilidade, escaladas por $\sqrt{d_k}$, normalizadas via softmax (produzindo pesos de atenção), e então combinadas com V em uma multiplicação final que gera o output Z. O fluxo segue da esquerda para a direita, de forma totalmente paralelizável. A equação no rodapé formaliza toda a operação.](../images/fig-attention-mechanism.png){#fig-attention-mechanism width=95%}
+
+## Arquitetura Transformer para Séries Temporais
+
+O Transformer segue uma estrutura encoder-decoder com adaptações específicas para dados sequenciais.
+
+### Embeddings e Codificação Posicional
+
+Ao contrário de RNNs, onde a posição temporal está implícita na recorrência, o Transformer processa toda a sequência em paralelo e, portanto, precisa ser explicitamente informado sobre a ordem. **Codificações posicionais** são adicionadas aos embeddings das entradas:
+
+$$
+PE_{(pos, 2i)} = \sin(pos / 10000^{2i/d_{model}})
+$$
+
+$$
+PE_{(pos, 2i+1)} = \cos(pos / 10000^{2i/d_{model}})
+$$
+
+Onde $pos$ é a posição na sequência e $i$ é a dimensão. Essas funções permitem ao modelo aprender a atentar para posições relativas, já que para qualquer deslocamento fixo $k$, $PE_{pos+k}$ pode ser representado como função linear de $PE_{pos}$.
+
+### Encoder
+
+O encoder é composto por uma pilha de $N$ camadas idênticas, cada uma com dois sub-módulos:
+
+1. **Multi-Head Self-Attention**: Permite que cada posição da sequência atente para todas as posições da camada anterior.
+
+2. **Feed-Forward Network (FFN)**: Rede totalmente conectada posição a posição:
+
+$$
+\text{FFN}(\mathbf{x}) = \max(0, \mathbf{x}\mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2
+$$
+
+Cada sub-módulo emprega conexões residuais seguidas de normalização de camada (*layer normalization*):
+
+$$
+\text{LayerNorm}(\mathbf{x} + \text{Sublayer}(\mathbf{x}))
+$$
+
+### Decoder
+
+O decoder também é composto por uma pilha de $N$ camadas idênticas, mas com três sub-módulos:
+
+1. **Masked Multi-Head Self-Attention**: Atenção sobre a saída gerada até o momento, com máscara para prevenir acesso a posições futuras.
+
+2. **Multi-Head Attention sobre Encoder**: Atenção sobre a representação completa da entrada.
+
+3. **Feed-Forward Network**: Idêntico ao do encoder.
+
+Para previsão de séries temporais, adaptações são necessárias. A máscara causal que impede o acesso ao futuro é essencial durante o treinamento para manter a consistência temporal.
+
+## Estudo de Caso: Previsão de Mortalidade com Transformer
+
+Implementamos uma arquitetura Transformer para previsão de taxas de mortalidade, seguindo a metodologia de @wang2024timeseries. Este estudo demonstra como o Transformer clássico pode ser efetivamente adaptado para dados demográficos, capturando simultaneamente padrões temporais e estruturas etárias.
+
+### Contexto e Dados
+
+O estudo utiliza dados da **Human Mortality Database (HMD)** para 8 países desenvolvidos: Reino Unido, França, Itália, Espanha, Japão, Dinamarca, Canadá e Finlândia. O período de 1950-2019 é dividido em:
+
+- **Treinamento**: 1950-2000 (51 anos)
+- **Teste**: 2001-2019 (19 anos)
+- **Faixa etária**: 0-100 anos
+
+A variável alvo é a **taxa central de mortalidade** $m_{x,t}$ na escala logarítmica. A estrutura dos dados é um painel tridimensional: idade × ano × país.
+
+### Preparação dos Dados
+
+```python
+#| echo: true
+#| eval: false
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+import warnings
+warnings.filterwarnings('ignore')
+
+# Configuração
+torch.manual_seed(42)
+np.random.seed(42)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Dispositivo: {device}")
+
+# Carregamento do painel pré-processado, versionado no repositório do livro
+# Exemplo de URL para uso no Colab:
+# BASE = "https://raw.githubusercontent.com/filipeduarte/book-project/main/data"
+# df_hmd = pd.read_csv(f"{BASE}/hmd_multipop_mx.csv")
+df_hmd = pd.read_csv("data/hmd_multipop_mx.csv")
+
+# Configuração dos países do estudo
+paises = ['GBR', 'FRA', 'ITA', 'ESP', 'JPN', 'DNK', 'CAN', 'FIN']
+anos_treino = np.arange(1950, 2001)
+anos_teste = np.arange(2001, 2020)
+idades = np.arange(0, 101)
+
+# Selecionar subconjunto do painel para demonstração
+df_treino = df_hmd[
+    (df_hmd['pop'].isin(paises[:3])) &
+    (df_hmd['sexo'] == 'f') &
+    (df_hmd['Age'].isin(idades)) &
+    (df_hmd['Year'].isin(anos_treino))
+].copy()
+
+df_treino = df_treino.rename(columns={
+    'pop': 'pais',
+    'Age': 'idade',
+    'Year': 'ano',
+    'mx': 'mortalidade'
+})
+df_treino['log_mortalidade'] = np.log(np.clip(df_treino['mortalidade'], 1e-8, None))
+
+print("Dataset de treino criado:")
+print(f"Total de observações: {len(df_treino)}")
+print(f"Países: {df_treino['pais'].unique()}")
+print(f"Idades: {df_treino['idade'].min()} a {df_treino['idade'].max()}")
+print(f"Anos: {df_treino['ano'].min()} a {df_treino['ano'].max()}")
+print(f"\nEstatísticas de log(mortalidade):")
+print(df_treino['log_mortalidade'].describe())
+
+# Visualização do padrão etário-temporal (heatmap)
+pivot_data = df_treino[df_treino['pais'] == 'GBR'].pivot(
+    index='idade', columns='ano', values='log_mortalidade'
+)
+
+plt.figure(figsize=(12, 8))
+plt.imshow(pivot_data.values, aspect='auto', cmap='viridis', 
+           extent=[1950, 2000, 100, 0])
+plt.colorbar(label='log(Mortalidade)')
+plt.xlabel('Ano')
+plt.ylabel('Idade')
+plt.title('Evolução da Mortalidade: Reino Unido (1950-2000)')
+plt.tight_layout()
+plt.show()
+```
+
+Nesta versão do livro, **não usamos pacote Python para importar a HMD diretamente no notebook**. O fluxo principal é trabalhar com um **painel pré-processado e versionado no repositório oficial do livro**, garantindo reprodutibilidade entre leitores e entre execuções no Colab. Para quem quiser reconstruir a base a partir dos arquivos brutos da HMD, deixamos a importação como etapa opcional em **R** no notebook do capítulo, separada do pipeline principal em Python.
+
+### Construção de Sequências com Janela Móvel
+
+```python
+#| echo: true
+#| eval: false
+def criar_sequencias_mortality(df, lookback_years=10):
+    """
+    Cria sequências usando técnica de janela móvel
+    Cada sequência contém log-mortalidade de todas as idades
+    """
+    sequencias = []
+    
+    for pais in df['pais'].unique():
+        df_pais = df[df['pais'] == pais]
+        
+        # Reorganizar em matriz (idade × ano)
+        matriz = df_pais.pivot(index='idade', columns='ano', values='log_mortalidade')
+        
+        n_anos = matriz.shape[1]
+        n_idades = matriz.shape[0]
+        
+        # Criar janelas deslizantes
+        for i in range(lookback_years, n_anos):
+            # Input: sequência de lookback_years para todas as idades
+            x_seq = matriz.iloc[:, i-lookback_years:i].values  # (idades, timesteps)
+            # Target: próximo ano para todas as idades
+            y_seq = matriz.iloc[:, i].values  # (idades,)
+            
+            sequencias.append({
+                'x': x_seq,
+                'y': y_seq,
+                'pais': pais,
+                'ano_target': matriz.columns[i]
+            })
+    
+    return sequencias
+
+# Criar sequências
+LOOKBACK = 10  # 10 anos de histórico
+sequencias = criar_sequencias_mortality(df_treino, lookback_years=LOOKBACK)
+
+print(f"Total de sequências criadas: {len(sequencias)}")
+print(f"Formato de cada sequência:")
+print(f"  Input: {sequencias[0]['x'].shape} (idades × timesteps)")
+print(f"  Target: {sequencias[0]['y'].shape} (idades)")
+
+# Dividir treino/validação
+train_size = int(0.85 * len(sequencias))
+train_seq = sequencias[:train_size]
+val_seq = sequencias[train_size:]
+
+print(f"\nTreino: {len(train_seq)}, Validação: {len(val_seq)}")
+```
+
+### Implementação do Transformer
+
+```python
+#| echo: true
+#| eval: false
+class PositionalEncoding(nn.Module):
+    """
+    Codificação posicional usando seno e cosseno
+    """
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
+        
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * 
+                            (-np.log(10000.0) / d_model))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        self.register_buffer('pe', pe)
+        
+    def forward(self, x):
+        return x + self.pe[:x.size(1), :]
+
+
+class TransformerMortality(nn.Module):
+    """
+    Transformer para previsão de mortalidade
+    Baseado em Wang et al. (2024) com adaptações
+    """
+    def __init__(self, 
+                 n_idades=101,
+                 d_model=32,
+                 nhead=2,
+                 num_layers=1,
+                 dim_feedforward=16,
+                 dropout=0.1):
+        super().__init__()
+        
+        self.n_idades = n_idades
+        self.d_model = d_model
+        
+        # Embedding de entrada (projeção para d_model)
+        self.input_embedding = nn.Linear(n_idades, d_model)
+        
+        # Codificação posicional
+        self.pos_encoder = PositionalEncoding(d_model)
+        
+        # Camada de dropout
+        self.dropout = nn.Dropout(dropout)
+        
+        # Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer, 
+            num_layers=num_layers
+        )
+        
+        # Camada de saída
+        self.output_layer = nn.Sequential(
+            nn.Linear(d_model, 64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, n_idades)
+        )
+        
+    def forward(self, src):
+        """
+        src: (batch, timesteps, n_idades)
+        """
+        # Embedding e codificação posicional
+        src = self.input_embedding(src)  # (batch, timesteps, d_model)
+        src = self.pos_encoder(src)
+        src = self.dropout(src)
+        
+        # Transformer encoding
+        output = self.transformer_encoder(src)  # (batch, timesteps, d_model)
+        
+        # Usar último timestep para previsão
+        output = output[:, -1, :]  # (batch, d_model)
+        
+        # Projetar para espaço de idades
+        output = self.output_layer(output)  # (batch, n_idades)
+        
+        return output
+
+
+# Instanciar modelo com hiperparâmetros do artigo
+modelo = TransformerMortality(
+    n_idades=101,
+    d_model=32,           # Embedding dimension
+    nhead=2,              # Attention heads
+    num_layers=1,         # Camadas encoder
+    dim_feedforward=16,   # Hidden size FFN
+    dropout=0.1
+).to(device)
+
+print("Arquitetura Transformer:")
+print(modelo)
+print(f"\nTotal de parâmetros: {sum(p.numel() for p in modelo.parameters()):,}")
+```
+
+### Treinamento
+
+```python
+#| echo: true
+#| eval: false
+class MortalityDataset(Dataset):
+    def __init__(self, sequencias):
+        self.sequencias = sequencias
+        
+    def __len__(self):
+        return len(self.sequencias)
+    
+    def __getitem__(self, idx):
+        seq = self.sequencias[idx]
+        return {
+            'x': torch.FloatTensor(seq['x'].T),  # (timesteps, idades)
+            'y': torch.FloatTensor(seq['y'])      # (idades,)
+        }
+
+# DataLoaders
+train_loader = DataLoader(MortalityDataset(train_seq), batch_size=32, shuffle=True)
+val_loader = DataLoader(MortalityDataset(val_seq), batch_size=32)
+
+# Função de treinamento
+def treinar_transformer(modelo, train_loader, val_loader, n_epochs=100, lr=0.001):
+    optimizer = torch.optim.Adam(modelo.parameters(), lr=lr)
+    criterion = nn.MSELoss()
+    
+    train_losses = []
+    val_losses = []
+    best_val_loss = float('inf')
+    patience = 15
+    patience_counter = 0
+    
+    print("Iniciando treinamento...")
+    print("="*60)
+    
+    for epoch in range(n_epochs):
+        # Treino
+        modelo.train()
+        train_loss = 0.0
+        
+        for batch in train_loader:
+            x = batch['x'].to(device)
+            y = batch['y'].to(device)
+            
+            optimizer.zero_grad()
+            y_pred = modelo(x)
+            loss = criterion(y_pred, y)
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item()
+        
+        train_loss /= len(train_loader)
+        train_losses.append(train_loss)
+        
+        # Validação
+        modelo.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in val_loader:
+                x = batch['x'].to(device)
+                y = batch['y'].to(device)
+                
+                y_pred = modelo(x)
+                loss = criterion(y_pred, y)
+                val_loss += loss.item()
+        
+        val_loss /= len(val_loader)
+        val_losses.append(val_loss)
+        
+        # Early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = modelo.state_dict().copy()
+            patience_counter = 0
+        else:
+            patience_counter += 1
+        
+        if (epoch + 1) % 20 == 0:
+            print(f"Época {epoch+1}/{n_epochs} - Train: {train_loss:.6f}, Val: {val_loss:.6f}")
+        
+        if patience_counter >= patience:
+            print(f"Early stopping na época {epoch+1}")
+            break
+    
+    if 'best_state' in locals():
+        modelo.load_state_dict(best_state)
+    
+    return train_losses, val_losses
+
+# Treinar
+print(f"Treinando com {len(train_seq)} sequências...")
+train_losses, val_losses = treinar_transformer(modelo, train_loader, val_loader, n_epochs=100)
+
+# Visualizar curvas
+plt.figure(figsize=(10, 5))
+plt.plot(train_losses, label='Treino', linewidth=2)
+plt.plot(val_losses, label='Validação', linewidth=2)
+plt.xlabel('Época')
+plt.ylabel('MSE Loss')
+plt.title('Curva de Aprendizado do Transformer')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.yscale('log')
+plt.tight_layout()
+plt.show()
+```
+
+### Avaliação e Comparação com Lee-Carter
+
+```python
+#| echo: true
+#| eval: false
+# Implementação simplificada do Lee-Carter para comparação
+class LeeCarter:
+    def fit(self, mort_matrix):
+        """mort_matrix: (idades, anos)"""
+        ln_m = np.log(mort_matrix)
+        self.a_x = np.mean(ln_m, axis=1)
+        
+        Z = ln_m - self.a_x[:, None]
+        U, S, Vt = np.linalg.svd(Z, full_matrices=False)
+        
+        self.b_x = U[:, 0]
+        self.k_t = S[0] * Vt[0, :]
+        
+        # Normalização
+        self.b_x = self.b_x / np.sum(self.b_x)
+        self.k_t = self.k_t - np.mean(self.k_t)
+        self.a_x = self.a_x + np.mean(self.k_t) * self.b_x
+        
+        # Calcular drift
+        self.drift = np.mean(np.diff(self.k_t))
+        
+    def predict(self, n_horizon):
+        """Prever n horizontes à frente"""
+        k_future = self.k_t[-1] + self.drift * np.arange(1, n_horizon + 1)
+        predictions = np.exp(self.a_x[:, None] + self.b_x[:, None] * k_future[None, :])
+        return predictions
+
+
+# Criar dados de teste e comparar
+print("="*70)
+print("COMPARAÇÃO: TRANSFORMER vs LEE-CARTER")
+print("="*70)
+
+# Preparar dados para Lee-Carter (matriz idade × ano)
+dados_lc = df_treino[df_treino['pais'] == 'GBR']
+matriz_lc = dados_lc.pivot(index='idade', columns='ano', values='mortalidade').values
+
+# Ajustar Lee-Carter
+lc = LeeCarter()
+lc.fit(matriz_lc)
+
+# Prever próximos 5 anos com Lee-Carter
+lc_pred = lc.predict(n_horizon=5)
+
+# Prever com Transformer (últimas sequências de validação)
+modelo.eval()
+transformer_preds = []
+
+with torch.no_grad():
+    for i in range(min(5, len(val_seq))):
+        x_test = torch.FloatTensor(val_seq[i]['x'].T).unsqueeze(0).to(device)
+        pred = modelo(x_test).cpu().numpy()[0]
+        transformer_preds.append(np.exp(pred))  # Voltar para escala original
+
+# Calcular métricas para uma idade específica
+idade_comp = 60
+
+print(f"\nComparação para idade {idade_comp}:")
+print(f"{'Ano':<10} {'Lee-Carter':<15} {'Transformer':<15}")
+print("-" * 40)
+
+for i in range(5):
+    ano = 2001 + i
+    lc_val = lc_pred[idade_comp, i] if i < lc_pred.shape[1] else 0
+    tf_val = transformer_preds[i][idade_comp] if i < len(transformer_preds) else 0
+    print(f"{ano:<10} {lc_val:<15.6f} {tf_val:<15.6f}")
+
+# Métricas simplificadas
+print("\n" + "="*70)
+print("RESULTADOS ESPERADOS (segundo Wang et al., 2024)")
+print("="*70)
+print("""
+MAE (Mean Absolute Error):
+- Lee-Carter:     0.1312 (Reino Unido)
+- LSTM:           0.1126
+- Transformer:    0.0716 ← MELHOR
+
+RMSE (Root Mean Square Error):
+- Lee-Carter:     0.1627
+- LSTM:           0.1587
+- Transformer:    0.1029 ← MELHOR
+
+MAPE (%):
+- Lee-Carter:     3.01%
+- LSTM:           2.36%
+- Transformer:    1.63% ← MELHOR
+
+Principais conclusões do estudo:
+1. O Transformer supera consistentemente o Lee-Carter em todos os países
+2. O modelo também supera RNN, LSTM e CNN na maioria dos casos
+3. Vantagem especialmente pronunciada no grupo etário alto (a >= 40)
+4. Menores variâncias indicam maior robustez (ordem de 10^-5)
+5. Convergência mais rápida (100 épocas vs mais épocas para LSTM)
+""")
+```
+
+## Vantagens e Limitações
+
+### Vantagens do Transformer para Mortalidade
+
+**Captura de Dependências de Longo Alcance:** O mecanismo de atenção permite que o modelo capture diretamente relações entre quaisquer pontos na sequência histórica, independentemente da distância temporal. Isso é particularmente valioso para mortalidade, onde choques demográficos podem ter efeitos persistentes por décadas.
+
+**Processamento Paralelo:** Diferente de RNNs que processam sequencialmente, o Transformer processa toda a janela de entrada em paralelo durante o treinamento, acelerando significativamente o aprendizado.
+
+**Previsões Suaves:** O estudo observa que o Transformer produz previsões mais suaves e próximas aos valores reais, evitando oscilações abruptas comuns em métodos menos sofisticados.
+
+**Ausência de Overfitting:** Apesar de ter muitos parâmetros, o modelo mostrou boa generalização quando adequadamente regularizado.
+
+### Limitações
+
+**Dados de Treinamento:** O modelo requer quantidade substancial de dados históricos para treinamento efetivo. Para países com séries curtas ou de baixa qualidade, métodos mais simples podem ser preferíveis.
+
+**Interpretabilidade:** Ao contrário do Lee-Carter, onde os componentes ($a_x$, $b_x$, $k_t$) têm interpretação demográfica clara, o Transformer opera como "caixa-preta". Os pesos de atenção oferecem alguma interpretabilidade, mas não têm significado demográfico direto.
+
+**Computação:** O treinamento requer recursos computacionais significativos, embora o estudo tenha usado apenas CPU com tempos razoáveis (modelo relativamente pequeno com 1 camada).
+
+## Conclusão
+
+O Transformer representa uma alternativa poderosa aos métodos tradicionais para previsão de mortalidade. Sua capacidade de capturar dependências complexas e de longo alcance, combinada com treinamento eficiente, produz previsões superiores ao Lee-Carter e a outras Deep Learning em praticamente todas as métricas avaliadas.
+
+Para o atuário e demógrafo, o Transformer oferece uma ferramenta adicional no arsenal de modelagem, especialmente valiosa quando:
+- Dados históricos longos e de alta qualidade estão disponíveis
+- Previsões de curto a médio prazo são necessárias
+- Recursos computacionais estão disponíveis
+- A marginal de ganho de precisão justifica a complexidade adicional
+
+Entretanto, para aplicações em que a interpretabilidade pesa mais, ou em que os dados são limitados, o Lee-Carter e suas extensões continuam sendo ferramentas robustas e adequadas. A escolha entre abordagens deve ser guiada por validação empírica rigorosa, conforme os protocolos do @sec-cap02.
+
+Com isso, fechamos a trilha principal de arquiteturas neurais do livro. O ponto central não é substituir automaticamente os modelos clássicos por Transformers, mas entender quando a complexidade adicional realmente se traduz em ganho preditivo substantivo.
+
+## Exercícios Propostos
+
+### Exercício 8.1
+Reproduza o experimento de @wang2024timeseries usando o **arquivo versionado de mortalidade disponível no repositório do livro** para pelo menos 3 países. Implemente um Transformer simplificado (1 camada, 2 heads, d_model=32) e compare com o Lee-Carter. Calcule MAE, RMSE e MAPE para horizontes de 1, 5 e 10 anos. Seus resultados confirmam a superioridade do Transformer?
+
+### Exercício 8.2
+Investigue o impacto do número de cabeças de atenção (*attention heads*) no desempenho. Treine modelos com 1, 2 e 4 heads (mantendo o mesmo número total de parâmetros). Como diferentes configurações afetam: (a) velocidade de treinamento, (b) qualidade das previsões, (c) padrões de atenção aprendidos? Existe um número ótimo de heads?
+
+### Exercício 8.3
+Estudo comparativo: Implemente e compare quatro arquiteturas em uma mesma tarefa de previsão de mortalidade: (1) MLP, (2) LSTM, (3) TCN, (4) Transformer. Mantenha o esforço de tuning similar para cada modelo. Crie uma tabela comparativa completa incluindo: número de parâmetros, tempo de treinamento, MAE, RMSE, MAPE. Qual arquitetura oferece o melhor trade-off entre precisão e complexidade?
+
+### Exercício 8.4
+Discuta criticamente a afirmação: "O sucesso do Transformer em NLP não se traduz automaticamente para séries temporais". Argumente sobre as diferenças fundamentais entre linguagem natural e séries temporais (estrutura, ruído, estacionariedade, interpretabilidade). Quando o Transformer é apropriado para séries temporais e quando métodos mais simples são preferíveis? Use evidência empírica dos capítulos 3-8 para sustentar seu argumento.
+
+### Nota sobre as Resoluções
+
+As resoluções completas dos exercícios deste capítulo estão disponíveis em notebooks Python no repositório oficial do livro no GitHub (`github.com/filipeduarte/book-project`). Cada notebook inclui código executável, visualizações e discussões detalhadas das soluções, permitindo que o leitor execute os exercícios no Google Colab e compare suas implementações com as propostas. Para a base de mortalidade, o fluxo principal usa os arquivos versionados do repositório; a importação bruta da HMD pode ser oferecida como bloco opcional em R no próprio notebook.

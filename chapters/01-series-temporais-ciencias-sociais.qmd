@@ -1,0 +1,239 @@
+# Séries Temporais em Ciências Sociais Aplicadas {#sec-cap01}
+
+> "O passado é prólogo."
+> --- William Shakespeare, *A Tempestade*, Ato II, Cena I.
+
+Uma série temporal é, no fundo, uma coisa simples: uma lista de números com uma data associada a cada um. O IPCA que sai todo dia 10, o número de óbitos registrados em São Paulo a cada semana, a Selic que o Copom define a cada 45 dias, a sinistralidade mensal de uma carteira de seguros, a nota média do Enem ano a ano — tudo isso cabe sob o mesmo guarda-chuva. E, no entanto, basta coçar a superfície para perceber que essa lista inocente se comporta muito diferente de uma planilha de dados comum. É essa diferença, e o que ela exige da gente na hora de analisar, que o livro vai perseguir.
+
+A intenção deste capítulo é mais cartográfica do que enciclopédica. Em vez de empilhar definições, proponho um mapa: o que faz de uma sequência ordenada um objeto estatístico peculiar; por que ferramentas pensadas para dados de corte transversal fracassam; quais componentes tentamos enxergar dentro da série; e como a tradição de Box, Jenkins e Hyndman conversa — ou deveria conversar — com a leva mais recente de aprendizado profundo e modelos de fundação. Ao chegar ao fim, o leitor deve ter à mão um esqueleto de decisões metodológicas que reaparece nos capítulos seguintes.
+
+## Por que séries temporais importam nas ciências sociais aplicadas
+
+Quase todo curso introdutório de estatística é construído em cima de uma hipótese cômoda: observações são independentes e identicamente distribuídas. É confortável porque permite pensar cada dado como uma nova amostra do mesmo sorteio. O problema é que basicamente nenhuma série temporal que interessa ao cientista social se comporta assim. O PIB do terceiro trimestre carrega metade do enredo do segundo; a inflação de abril é, em boa medida, a inflação de março arrastada para adiante com alguma novidade; a mortalidade de uma coorte este ano conversa diretamente com a do ano passado [@shumway2017time; @enders2014applied]. Desconsiderar essa amarra temporal não produz apenas imprecisão — produz inferências falsas: erros-padrão que parecem menores do que são, intervalos de confiança que mentem sobre a incerteza, testes que rejeitam a nula quando não há razão para isso.
+
+Essa discussão não é só acadêmica. Política pública é feita em cima de projeções de arrecadação, de desemprego, de demografia. Reservas técnicas de seguradoras são calibradas com projeções de passivos de décadas. O Banco Central do Brasil toma decisões de juros olhando para expectativas condicionais de inflação. Um varejista planeja compras de Natal com modelos de demanda. Em nenhum desses casos a pergunta relevante é sobre um valor médio; é sempre algo do tipo "qual o valor provável daqui a $h$ períodos, dado tudo o que vi até agora?" — e é isso, exatamente, que séries temporais tentam responder [@hyndman2021forecasting; @petropoulos2022forecasting].
+
+Vale também uma consideração mais filosófica. Os fenômenos sociais raramente têm o bom gosto de serem estacionários. Instituições mudam, regras monetárias se alteram, tecnologias viram o mercado de cabeça para baixo, pandemias reconfiguram hábitos. Uma série macroeconômica brasileira de 1994 para cá atravessa, no mínimo, Plano Real, crise cambial de 1999, metas de inflação a partir de 1999, crise de 2008, ciclos de commodities, recessão de 2015–2016, pandemia. Dizer que essa série é "não estacionária" é quase eufemismo. Parte significativa do trabalho analítico é, na prática, achar um jeito de conviver com essa não estacionariedade — seja modelando-a explicitamente, seja transformando a série até que o que sobra seja tratável [@nelson1982trends; @bueno2011econometria].
+
+## O que define uma série temporal
+
+Na notação que vai aparecer a cada capítulo, uma série temporal univariada é só isso: uma sequência $\{y_t\}_{t=1}^{T}$ de observações de uma variável aleatória $Y_t$, indexada pelo tempo $t$. Quando medimos várias variáveis simultaneamente — IPCA, Selic, câmbio, etc. — o objeto vira $\{\mathbf{y}_t\}$, com $\mathbf{y}_t \in \mathbb{R}^d$, e caímos na multivariada. A notação é elementar; o que importa são três propriedades que separam esse objeto de uma tabela qualquer: **ordenação**, **frequência** e **dependência**.
+
+Comece pela **ordenação**. Ela é, na prática, o que há de inegociável aqui. Embaralhar as linhas de uma tabela de características de domicílios não muda conclusão nenhuma; embaralhar uma série temporal apaga a própria coisa que se quer estudar. A consequência operacional mais imediata é que o famoso *k-fold* aleatório que se ensina em aulas introdutórias de aprendizado de máquina simplesmente não se aplica — permitir que o modelo "veja" o futuro durante o treino é receita de desastre. O Capítulo 2 é inteiro dedicado a esse problema.
+
+A **frequência** — anual, trimestral, mensal, diária, horária, por minuto — parece um detalhe técnico, mas não é. A econometria clássica, com seus ARIMA e ETS, foi construída pensando em dados mensais e trimestrais, horizontes de alguns períodos e amostras modestas. As arquiteturas profundas que veremos na Parte II, ao contrário, costumam brilhar em frequências altas e horizontes longos, onde há volume de dados suficiente para justificar modelos com milhões de parâmetros [@zhou2021informer; @nie2023patchtst]. E a escolha da frequência em si carrega uma decisão substantiva: agregar diário em mensal suaviza o ruído, mas varre para baixo do tapete justamente os eventos raros que podem interessar.
+
+A **dependência** é o coração estatístico da disciplina. Em algum sentido, toda modelagem de séries temporais é uma tentativa de descrever como $y_t$ se relaciona com seu próprio passado — $y_{t-1}, y_{t-2}$ e assim por diante. Os modelos ARIMA, que aparecem no Capítulo 3, foram concebidos exatamente para capturar essa dependência de maneira parcimoniosa [@box2015time]. A tradição estatística costuma olhar para a série como uma soma de quatro ingredientes: uma **tendência** de longo prazo, uma **sazonalidade** de período conhecido (o 13º de dezembro, a fatura pesada de janeiro), **ciclos** sem periodicidade fixa (os ciclos de negócios, as bolhas imobiliárias) e um **componente irregular**, o resto que sobra. Ferramentas como a decomposição STL [@cleveland1990stl] tornam essa separação operacional e prestam serviço duplo: diagnóstico da série e construção de previsões componente a componente.
+
+## Exemplos motivadores no contexto brasileiro
+
+Vale, antes de ir adiante, pensar na variedade de perguntas brasileiras que só fazem sentido porque existe uma série temporal por trás. Toda segunda-feira, o Relatório Focus consolida as expectativas do mercado para IPCA, PIB, câmbio e Selic — e isso entra, literalmente, na sala do Copom quando se decide a taxa de juros. Receita Federal e Tesouro calibram projeções de arrecadação que definem o arcabouço fiscal e quanto se gasta com despesas obrigatórias. SUSEP e PREVIC exigem de seguradoras e fundos de pensão reservas técnicas calculadas a partir de projeções demográficas de décadas. O IBGE publica PMC e PIM-PF todo mês, e quem trabalha com varejo e indústria planeja estoques e produção em cima disso. Durante a pandemia, o SIVEP-Gripe e o SIM — séries diárias, não mensais — foram insumo direto para decisões de saúde pública que custaram ou salvaram vidas. Secretarias estaduais organizam contagens de homicídios e roubos com forte padronização sazonal. E o INEP acumula, há décadas, séries de Enem, Saeb e Censo Escolar que permitem avaliar o efeito de políticas educacionais sobre desempenho e fluxo.
+
+A diversidade é, por si só, instrutiva. Esses problemas variam em tudo: frequência (semanal, diária, mensal, anual), escala (uma série ou milhares), ordem de integração (o IPCA tende a ser estacionário em nível, o câmbio não), tipo de ruído (contagens discretas de homicídios versus percentuais suaves de pesquisas amostrais), e — talvez o mais importante — no custo de errar. Um erro de 0,5 ponto percentual na previsão de inflação tem consequências muito distintas de um erro de mesma magnitude na projeção de sobrevivência de um plano de previdência. Nenhum livro dá conta de tudo. A escolha feita aqui foi ancorar todas as comparações em três conjuntos de dados bem definidos, descritos adiante, de forma que o leitor possa julgar, capítulo a capítulo, quando cada técnica compensa e quando não.
+
+## Estacionariedade e dependência temporal
+
+Estacionariedade é o conceito fundante da econometria clássica de séries temporais, e gasta-se muito papel tentando defini-la com precisão. A ideia é simples de apresentar: uma série é estacionária quando suas propriedades estatísticas — média, variância, autocovariâncias — não mudam ao longo do tempo. Não se trata de exigir que a série seja constante; exige-se que o comportamento *estatístico* seja invariante a deslocamentos no tempo. A razão para insistir nisso é prática: os resultados assintóticos que justificam OLS, máxima verossimilhança e companhia pressupõem alguma forma de estacionariedade para funcionar.
+
+O problema, é claro, é que séries econômicas raramente cooperam. @nelson1982trends mostraram, para os agregados macroeconômicos dos Estados Unidos, que processos com raiz unitária descrevem melhor a realidade do que processos estacionários em torno de uma tendência determinística. A distinção parece esotérica até que se descobre o que ela implica: regressões entre séries com raiz unitária podem gerar relações espúrias, $R^2$ de 0,9 e estatísticas $t$ significativas mesmo quando as variáveis não têm nada a ver umas com as outras. O teste de @dickey1979distribution virou a ferramenta padrão para flagrar esse tipo de problema, e a ideia de cointegração de @engle1987cointegration descreve o caso favorável em que, mesmo não estacionárias individualmente, combinações de séries capturam um equilíbrio de longo prazo que *é* estacionário.
+
+Para fins deste livro, bastam duas ideias. Primeiro: antes de estimar qualquer coisa, olhar para a série — o gráfico simples, o correlograma, um teste de raiz unitária — economiza horas de frustração depois. Segundo: o problema não some porque se trocou ARIMA por rede neural. Arquiteturas profundas treinadas em séries não estacionárias sem normalização adequada produzem previsões pobres, e técnicas como RevIN e *patch normalization* [@nie2023patchtst] são, no fundo, respostas modernas a um problema que já assombrava econometria há décadas.
+
+## Do paradigma clássico ao aprendizado de máquina moderno
+
+A história da previsão de séries temporais pode ser contada como um diálogo — às vezes truncado, às vezes produtivo — entre duas tradições. De um lado, a estatística e a econometria, com ARIMA, espaço de estados, suavização exponencial e VAR na bagagem; a força dessa linha está em parcimônia, interpretabilidade e garantias teóricas bem estabelecidas [@box2015time; @hyndman2002state; @hyndman2021forecasting]. Do outro, o aprendizado de máquina, que ganhou fôlego ao longo dos anos 2010 com redes recorrentes [@hochreiter1997long; @salinas2020deepar], convoluções temporais [@bai2018empirical; @oord2016wavenet], *Transformers* [@vaswani2017attention; @zhou2021informer; @nie2023patchtst] e, mais recentemente, modelos de fundação treinados em escalas antes inimagináveis [@ansari2024chronos; @das2024timesfm; @woo2024moirai].
+
+Por muito tempo, os dois campos mal se falaram. A competição M4 [@makridakis2018m4; @makridakis2020m4] foi um divisor de águas: 100 mil séries, 61 métodos, e o primeiro lugar ficou com um método híbrido — o de @smyl2020hybrid, que combinou suavização exponencial com redes recorrentes. A lição foi dupla. *Baselines* estatísticos bem ajustados são competitivos e merecem respeito; e a combinação deliberada entre estatística e aprendizado profundo pode, sim, render ganhos reais. A M5 [@makridakis2022m5] reforçou o diagnóstico em um contexto hierárquico de varejo.
+
+Isso não fechou a discussão. @zeng2023transformers levantou a suspeita — incômoda, e provavelmente justa em muitos casos — de que arquiteturas baseadas em atenção nem sempre superam alternativas lineares simples em séries temporais. A controvérsia, retomada no Capítulo 8, é saudável: novidade arquitetural não é garantia de ganho empírico. Para quem vem da econometria ou da ciência atuarial, o debate soa familiar — é a velha disputa entre parcimônia e flexibilidade em roupa nova [@varian2014big; @athey2019machine]. A postura adotada aqui é pragmática: os *baselines* estatísticos vêm antes das redes profundas não por reverência ao passado, mas porque sem uma régua bem construída não se mede ganho nenhum.
+
+## Os três conjuntos de dados unificadores
+
+Ao longo de todos os capítulos, as comparações entre métodos recorrem a três *datasets* fixos. A opção é deliberada: permite que o leitor siga, capítulo a capítulo, como cada modelo se comporta nos mesmos dados, e vá construindo intuição sobre quando uma abordagem compensa e quando não. Os três conjuntos foram escolhidos para cobrir as três escalas típicas da prática aplicada: (i) um **painel multivariado pequeno**, em que interpretar importa tanto quanto prever; (ii) uma **coleção grande e heterogênea**, que testa se o modelo generaliza além de um único domínio; e (iii) um **painel demográfico longitudinal** em que a dimensão coorte–idade–período é justamente o objeto. Esta seção apresenta cada um — variáveis, fontes, códigos de acesso, período amostral, características estatísticas — e traz o código mínimo para carregá-los em Python.
+
+A tabela a seguir resume os três conjuntos.
+
+| Conjunto | Natureza | Frequência(s) | \#Séries | Período típico | Fonte principal |
+|---|---|---|---|---|---|
+| Painel macro BR | Econômico, multivariado | Mensal / trimestral | 5 | 1999--hoje | SGS/BCB, SIDRA/IBGE |
+| M4 | Benchmark amplo | Anual, trim., mensal, sem., diária, horária | 100.000 | variável | M4 Competition |
+| Mortalidade internacional + BR | Demográfico, painel país × idade × período | Anual | $\approx$ 40 países (HMD) + Brasil (IBGE) | 1751--hoje (varia) | HMD [@hmd2024], IBGE |
+
+### Painel macroeconômico brasileiro
+
+De longe o mais próximo da prática cotidiana de quem trabalha com dados no Brasil. Reúne cinco variáveis que aparecem, em alguma combinação, em basicamente qualquer exercício de conjuntura, previsão ou política pública. O ponto de partida das séries fica em torno de 1999–2000 — o período imediatamente posterior à implantação do regime de metas, do câmbio flutuante e da Lei de Responsabilidade Fiscal, quando o arranjo institucional da macro brasileira se estabiliza razoavelmente.
+
+| Variável | Descrição | Unidade | Frequência | Código SGS/BCB | Fonte primária |
+|---|---|---|---|---|---|
+| IPCA | Índice de Preços ao Consumidor Amplo, variação mensal | % m/m | Mensal | 433 | IBGE (SIDRA 1737) |
+| PIB | Produto Interno Bruto real, índice encadeado | índice (1995 = 100) | Trimestral | 22109 | IBGE (SIDRA 1621) |
+| Selic | Meta da taxa Selic definida pelo Copom | % a.a. | Mensal (fim de período) | 432 | Banco Central |
+| Câmbio | Taxa de câmbio nominal R$/US\$, venda, fim de período | R\$/US\$ | Mensal | 3695 | Banco Central (PTAX) |
+| Desocupação | Taxa de desocupação da força de trabalho, PNAD Contínua | \% | Mensal (trimestre móvel) | 24369 | IBGE (SIDRA 6381) |
+
+Três propriedades estatísticas deste painel o tornam especialmente didático. A primeira é que as variáveis têm **ordens de integração distintas**: IPCA e variação do câmbio costumam ser estacionários em nível, enquanto PIB e câmbio em nível apresentam comportamento de raiz unitária, e a Selic se move como uma série altamente persistente com reversão lenta [@bueno2011econometria]. Essa heterogeneidade obriga, na prática, a tomar decisões concretas de pré-processamento — diferenciar, tirar log, normalizar — que em cursos introdutórios costumam aparecer como exercício abstrato.
+
+A segunda é a presença de **quebras estruturais bem documentadas**: a transição do câmbio fixo para o flutuante em janeiro de 1999, a crise de 2008, a recessão de 2014–2016, o choque da pandemia em 2020 e as revisões metodológicas das contas nacionais. Qualquer avaliação fora da amostra que cruze 2020 é, por construção, um teste severo de robustez — e é nessa zona que modelos sofisticados costumam revelar seus problemas.
+
+Por fim, há **frequências mistas**: o PIB é trimestral, as demais são mensais. Esse descasamento é o motor do problema clássico de *nowcasting* e da literatura de modelos MIDAS, filtros de Kalman e espaço de estados, aos quais voltamos em capítulos posteriores [@hamilton1994time].
+
+O carregamento em Python é direto via o pacote `python-bcb` (acesso ao SGS/BCB) e `sidrapy` (acesso ao SIDRA/IBGE):
+
+```python
+from bcb import sgs
+import pandas as pd
+
+# Painel macro BR: janeiro de 2003 em diante (pós-metas de inflação estabilizadas)
+series = {
+    "ipca":       433,    # IPCA % m/m
+    "pib_idx":    22109,  # PIB real, índice encadeado
+    "selic":      432,    # Meta Selic % a.a.
+    "cambio":     3695,   # USD/BRL, fim de período
+    "desocup":    24369,  # Taxa de desocupação PNAD-C
+}
+painel = sgs.get(series, start="2003-01-01")
+painel.head()
+```
+
+A convenção do livro é usar este painel das duas formas: como cinco séries univariadas, uma de cada vez, quando ajustamos ARIMA ou ETS; e como um bloco multivariado quando entram os *Transformers* multivariados do Capítulo 8.
+
+### M4 Competition
+
+Introduzido por @makridakis2018m4 e disponibilizado gratuitamente no GitHub da competição, o M4 reúne 100.000 séries temporais de domínios e frequências bastante distintos. É, provavelmente, o *benchmark* mais importante da disciplina — a ponto de qualquer artigo sério de *forecasting*, qualquer *survey* recente e qualquer conferência relevante tratá-lo como referência obrigatória [@godahewa2021monash; @benidis2022deep].
+
+A composição do M4 distribui as 100 mil séries em seis frequências e seis domínios, conforme a tabela:
+
+| Frequência | \#Séries | Horizonte de teste | Períodos típicos |
+|---|---|---|---|
+| Yearly | 23.000 | 6 | 1--835 |
+| Quarterly | 24.000 | 8 | 16--866 |
+| Monthly | 48.000 | 18 | 42--2.812 |
+| Weekly | 359 | 13 | 93--2.610 |
+| Daily | 4.227 | 14 | 107--9.933 |
+| Hourly | 414 | 48 | 700--960 |
+
+Os domínios — micro, industrial, macro, finanças, demografia e "outros" — são herança direta das competições M anteriores, e existem justamente para evitar que um modelo no topo do ranking esteja, na verdade, sobreajustado a um único tipo de problema. Cada série vem com um bloco de treino e um horizonte de teste de tamanho fixo; o vencedor oficial, como mencionado, foi @smyl2020hybrid, combinando suavização exponencial e redes recorrentes.
+
+Para os fins deste livro, duas propriedades do M4 são especialmente importantes. A **heterogeneidade de tamanhos** — séries de 42 observações convivem com séries de quase três mil — e a **heterogeneidade de sazonalidades** — 12 no mensal, 4 no trimestral, 52 no semanal, 7 ou 365 no diário, 24 no horário. Essas duas fontes de variabilidade transformam o M4 em um teste de estresse para qualquer abordagem que dependa de hiperparâmetros globais, e explicam por que métricas invariantes à escala, como MASE e OWA, são tão importantes (Capítulo 2).
+
+O carregamento é facilitado pelo pacote `datasetsforecast`, mantido por Nixtla:
+
+```python
+from datasetsforecast.m4 import M4
+
+# Subconjunto mensal: 48k séries, horizonte de teste = 18
+Y_df, *_ = M4.load(directory="./data", group="Monthly")
+Y_df.head()
+```
+
+### Mortalidade: HMD (internacional) e IBGE (Brasil) {#sec-datasets-mortality}
+
+O terceiro conjunto mistura duas fontes complementares: a **Human Mortality Database** (HMD) para comparações internacionais e as **Tábuas Completas de Mortalidade do IBGE** para o recorte brasileiro. A combinação não é por acaso. A HMD traz profundidade histórica e comparabilidade entre países, mas não inclui o Brasil em seu núcleo — o país, por ora, não atende aos requisitos de completude de registros vitais exigidos pela base. O IBGE, em contrapartida, publica anualmente suas tábuas seguindo metodologia demográfica padrão, e essas tábuas são a referência oficial tanto para o cálculo do fator previdenciário do INSS quanto para a regulação atuarial feita pela SUSEP. Usar as duas juntas é o melhor dos dois mundos: treinar em séries longas (HMD) e avaliar contra a realidade brasileira (IBGE).
+
+**Human Mortality Database.** Mantida em parceria entre a Universidade da Califórnia em Berkeley e o *Max Planck Institute for Demographic Research*, a HMD publica séries de mortalidade de alta qualidade para cerca de 40 países com registros vitais completos. Para alguns poucos — Suécia, França, Itália —, os registros vão ininterruptamente até meados do século XVIII, o que é uma raridade na estatística aplicada. Para cada combinação de país, sexo e idade $x \in \{0, 1, \ldots, 110\!+\!\}$, a HMD disponibiliza três grandezas fundamentais:
+
+| Variável | Definição | Uso típico |
+|---|---|---|
+| $D_{x,t}$ | Número de óbitos na idade $x$ durante o ano $t$ | Numerador em taxas de mortalidade |
+| $E_{x,t}$ | População exposta ao risco na idade $x$ durante o ano $t$ | Denominador em taxas de mortalidade |
+| $m_{x,t} = D_{x,t} / E_{x,t}$ | Taxa central de mortalidade | Entrada de modelos Lee-Carter, APC etc. |
+
+A estrutura é um **painel tridimensional** país × idade × período, e três propriedades tornam a HMD particularmente conveniente para estudar arquiteturas modernas. Primeiro, as **séries são longas**: taxas de idades adultas em países europeus cobrem facilmente 150 anos de observações anuais, o que dá folga para ajustar modelos com muitos parâmetros sem estourar a amostra. Segundo, há **estrutura hierárquica explícita** — idades vizinhas compartilham regularidades demográficas fortes, e modelar essa suavidade (como fazem Lee-Carter, APC e LocalGLMnet) é quase uma necessidade, conforme discutem @booth2008mortality e @perla2024localglmnet. Terceiro, e talvez mais interessante, a HMD é um **laboratório natural de modelagem por coorte**: gerações que atravessaram a gripe espanhola, a Segunda Guerra ou a epidemia de HIV carregam assinaturas específicas de mortalidade ao longo da vida — o tipo de padrão que arquiteturas convolucionais e *Transformers* podem, em princípio, aprender de forma mais expressiva do que modelos lineares clássicos.
+
+O carregamento em Python se dá por *download* direto do portal `mortality.org` (após cadastro gratuito) ou, alternativamente, pelo pacote `HMDHFDplus` do R via `rpy2`:
+
+```python
+import pandas as pd
+
+# Arquivo Mx_1x1 (taxas centrais, anos x idades 0-110) baixado do portal HMD
+# após cadastro em https://www.mortality.org
+mx_swe = pd.read_csv(
+    "data/hmd/SWE.Mx_1x1.txt",
+    skiprows=2, sep=r"\s+",
+)
+mx_swe.head()
+```
+
+Do Capítulo 5 em diante, o recorte internacional padrão será a Suécia (sexo feminino, idades 0–99, anos 1900–2019). É uma escolha pragmática: combina extensão temporal grande e qualidade de registros, e é comparável à configuração adotada em @perla2024localglmnet.
+
+**Tábuas Completas de Mortalidade do IBGE.** Publicadas anualmente desde 1998, com reconstruções metodológicas que remontam a 1940, as Tábuas Completas descrevem, para a população residente no Brasil, a probabilidade de óbito $q_x$, o número de sobreviventes $\ell_x$, os óbitos esperados $d_x$ e a expectativa de vida remanescente $e_x$, por sexo e por idade simples $x \in \{0, 1, \ldots, 80\!+\!\}$. A tabela a seguir resume as variáveis e faz o mapeamento para a notação internacional usada na HMD.
+
+| Variável IBGE | Símbolo | Definição | Equivalente HMD |
+|---|---|---|---|
+| Probabilidade de óbito | $q_x$ | Prob. de morrer entre $x$ e $x+1$ | $q_x$ |
+| Sobreviventes | $\ell_x$ | Núm. de pessoas vivas na idade exata $x$ de uma coorte fictícia de 100 mil nascimentos | $\ell_x$ |
+| Óbitos | $d_x = \ell_x - \ell_{x+1}$ | Núm. de óbitos entre $x$ e $x+1$ | $d_x$ |
+| Expectativa de vida | $e_x$ | Anos remanescentes esperados de vida na idade $x$ | $e_x$ |
+
+Recuperar as taxas $m_x$ da HMD a partir das tábuas do IBGE é direto via a relação clássica $m_x \approx q_x / (1 - 0{,}5\, q_x)$, o que permite comparações diretas entre as duas fontes. As tábuas ficam no portal do IBGE e em arquivos XLSX disponibilizados a cada atualização. Vale notar que, em cada revisão da Projeção da População, o IBGE publica também projeções de mortalidade até 2100 por sexo e idade — insumo padrão para cálculo atuarial e dimensionamento previdenciário.
+
+Abaixo temos as tabelas com os óbitos por faixa etária e ano de ocorrência para população de homens e mulheres residentes no Brasil para o ano de 2022, que foi o ano mais recente disponível no portal do IBGE até a data de escrita deste livro.
+
+```python
+import requests
+import zipfile
+import os
+import pandas as pd
+
+url = 'https://biblioteca.ibge.gov.br/visualizacao/periodicos/3097/tcmb_2024_tabelas.zip'
+
+# Download o arquivo zipado com as tabelas do ano de 2024
+zip_file_name = 'tcmb_2024_tabelas.zip'
+response = requests.get(url)
+with open(zip_file_name, 'wb') as f:
+    f.write(response.content)
+
+# Unzip 
+output_dir = 'tcmb_data'
+os.makedirs(output_dir, exist_ok=True)
+with zipfile.ZipFile(zip_file_name, 'r') as zip_ref:
+    zip_ref.extractall(output_dir)
+
+# Importar o arquivo em excel para ambos os sexos
+excel_file_path = os.path.join(output_dir, 'ambos_os_sexos.xlsx')
+
+# Leia o arquivo Excel, pulando as primeiras 5 linhas (índices 0 a 4 em Python),
+# e tratando a primeira linha de dados (linha 6 original do Excel) como parte dos dados, e não como cabeçalho.
+new_column_names = [
+    'Idade Exata (X)',
+    'Probabilidades de Morte entre Duas Idades Exatas Q (X, N) (Por Mil)',
+    'Óbitos D (X, N)',
+    'l (X)',
+    'L (X, N)',
+    'T(X)',
+    'Expectativa de Vida à Idade X E(X)'
+]
+
+# Leia o arquivo Excel, pulando as primeiras 5 linhas (índices 0 a 4 em Python), 
+# e tratando a primeira linha de dados (linha 6 original do Excel) como parte dos dados, não como cabeçalho.
+df_ambos_sexos = pd.read_excel(excel_file_path, skiprows=6, header=None)
+
+# Declare o nome das colunas
+df_ambos_sexos.columns = new_column_names
+
+#Remova as linhas especificadas:
+#As linhas 52 a 66 do Excel correspondem aos índices 46 a 60 no novo DataFrame.
+rows_to_drop_1 = list(range(45, 60))  # Inclusive range [46, 60]
+# As últimas 9 linhas são metadados e devem ser removidas.
+rows_to_drop_last = [len(df_ambos_sexos) - 1]
+
+df_ambos_sexos = df_ambos_sexos.drop(index=rows_to_drop_1 + rows_to_drop_last).reset_index(drop=True)
+df_ambos_sexos.drop(index=[i for i in range(91, 100)], inplace=True)
+
+print(f"Arquivo '{zip_file_name}' baixado e unzipped para '{output_dir}'.")
+print(f"'ambos_os_sexos.xlsx' importados em um DataFrame 'df_ambos_sexos' com cabeçalho e linhas ajustadas.")
+
+display(df_ambos_sexos.head())
+```
+
+Dos Capítulos 5 a 8, o recorte brasileiro padrão combina o histórico reconstruído desde 1940, usado para treinar modelos de tendência, com a projeção oficial 2022–2060, que serve de referência para *backtest* de previsões de longo prazo. Há diferenças metodológicas entre HMD e IBGE — a mais relevante, o tratamento da idade aberta (80+ no IBGE, 110+ na HMD). Quando essas diferenças importam, retomo o assunto no capítulo correspondente.
+
+## Roteiro do livro
+
+A Parte I arruma os fundamentos. O Capítulo 2 trata de avaliação rigorosa: particionamento temporal, métricas, Diebold-Mariano e Model Confidence Set [@diebold1995comparing; @hansen2011model]. O Capítulo 3 apresenta os *baselines* estatísticos que servem de contraponto a tudo que vem depois — ARIMA, ETS, Theta, STL. O Capítulo 4 entra nos modelos atuariais de projeção de mortalidade (Lee-Carter, CBD, Renshaw-Haberman), um tema que sai pouco dos manuais específicos mas é essencial para previdência, seguros e demografia brasileira. A Parte II percorre as arquiteturas profundas — *feedforward*, recorrentes, convolucionais e *Transformers* — com ênfase em quando cada uma realmente se justifica. Os apêndices reúnem o ferramental computacional e matemático necessário.
+
+Para quem está começando, a sugestão é linear: Parte I inteira antes de encarar a Parte II. Quem já tem experiência pode saltar direto para os capítulos da Parte II, que são razoavelmente autocontidos — a ressalva é que o Capítulo 2 precisa ter sido lido. Sem um protocolo de avaliação sólido, qualquer comparação entre modelos desanda.
+
+## Leituras recomendadas
+
+Para aprofundar os fundamentos estatísticos, @morettin2018analise é o tratamento clássico em português, e @hyndman2021forecasting segue sendo a referência moderna mais acessível (e gratuita) em inglês. @bueno2011econometria e @enders2014applied cobrem econometria de séries temporais com profundidade; @hamilton1994time e @shumway2017time são referências avançadas para quando a ambição aperta. Para uma visão panorâmica do estado da arte, vale olhar @petropoulos2022forecasting, @benidis2022deep e @lim2021time. E, para o diálogo entre econometria e aprendizado de máquina, @varian2014big e @athey2019machine continuam sendo pontos de partida difíceis de superar.

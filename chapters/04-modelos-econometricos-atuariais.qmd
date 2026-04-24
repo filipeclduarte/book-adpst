@@ -1,0 +1,290 @@
+# Modelos Atuariais para Séries Temporais {#sec-cap04}
+
+Até agora o livro tratou séries temporais uma de cada vez: você olha para o passado de uma variável e tenta dizer algo sobre seu futuro. Neste capítulo muda a natureza do objeto. A demografia atuarial não lida com uma série, e sim com uma matriz: para cada idade $x$ e cada ano $t$ existe uma taxa de mortalidade $m_{x,t}$. O que interessa prever é a matriz inteira, porque dela saem as contas que de fato importam na vida de um atuário — o valor presente de uma anuidade, a reserva de um plano de benefício definido, o prêmio de um seguro de vida, a regra de transição de uma reforma previdenciária.
+
+Duas coisas tornam esse problema mais bem-comportado do que séries econômicas típicas. Primeiro, a mortalidade cai de maneira bastante regular há décadas, em quase todos os países com registros civis decentes. Segundo, idades vizinhas se movem juntas: a taxa dos 59 anos no ano $t$ traz muita informação sobre a dos 60 no mesmo ano. Essa regularidade abre espaço para modelos parcimoniosos. Os três que dominam a prática internacional — Lee-Carter, Cairns-Blake-Dowd e Renshaw-Haberman — são, no fundo, diferentes escolhas sobre como resumir a matriz em poucos fatores e como projetá-los adiante. É isto que veremos a seguir.
+
+## O modelo Lee-Carter
+
+A proposta de @lee1992modeling apareceu no *Journal of the American Statistical Association* em 1992 e, três décadas depois, ainda é o ponto de partida de praticamente todo sistema oficial de projeção demográfica. A razão do sucesso é quase estética: o modelo reduz uma matriz de taxas a três objetos interpretáveis.
+
+$$
+\ln(m_{x,t}) = a_x + b_x k_t + \varepsilon_{x,t}
+$$
+
+Pense nessa equação assim. O termo $a_x$ é o perfil etário médio da mortalidade — a "forma" da curva, alta nos extremos e com o mínimo perto dos dez anos, que todo demógrafo reconhece de olhos fechados. O índice $k_t$ é um resumo unidimensional do tempo: um número por ano que caminha para baixo à medida que a sociedade fica mais saudável. E $b_x$ diz quanto cada idade reage quando $k_t$ anda um passo — idades que respondem mais têm $b_x$ maior. Projetar o futuro vira, então, um problema de prever uma série só: basta modelar $k_t$, tipicamente como um passeio aleatório com deriva, e reconstituir as taxas por idade pela própria equação do modelo.
+
+O preço dessa parcimônia está no $b_x$ ser fixo no tempo. Na prática, o padrão de ganho de longevidade migrou: no século XX a maior queda ocorreu na mortalidade infantil; nas últimas décadas ela se concentra em idades avançadas. Um $b_x$ estimado num período longo mistura esses regimes e pode subestimar ganhos em um grupo etário específico. Isso motivou as extensões que vêm a seguir.
+
+### CBD e efeitos de coorte
+
+O modelo de @cairns2006two, conhecido pelas iniciais dos três autores, nasceu de uma insatisfação prática: seguradoras que vendem anuidades precisam modelar bem as idades de 60 em diante, justamente onde o Lee-Carter costuma ter ajuste pior. A solução é trocar o alvo e a forma funcional. Em vez da log-taxa, modela-se o *logit* da probabilidade de morte; em vez de um único fator temporal, usam-se dois, com interpretações distintas:
+
+$$
+\text{logit}(q_{x,t}) = \kappa_t^{(1)} + \kappa_t^{(2)}(x - \bar{x}) + \varepsilon_{x,t}
+$$
+
+O primeiro fator, $\kappa_t^{(1)}$, captura o nível geral de mortalidade entre os idosos; o segundo, $\kappa_t^{(2)}$, descreve como a inclinação da curva logit muda com o tempo — ou seja, se as melhorias estão se concentrando nos mais jovens dentro da faixa dos 60+ ou se espalham até os 90. É um modelo com menos pretensão de cobrir a tabela de vida inteira, mas com mais flexibilidade no pedaço que interessa à precificação de anuidade.
+
+Há ainda uma dimensão que nenhum dos dois captura bem: a coorte. Quem nasceu em 1918, em plena gripe espanhola, ou em 1945, com desnutrição de guerra, carrega marcas de mortalidade diferentes das coortes vizinhas, ao longo de toda a vida. O modelo Renshaw-Haberman [@renshaw2006cohort] estende o Lee-Carter incluindo um termo de coorte:
+
+$$
+\ln(m_{x,t}) = a_x + b_x^{(1)} k_t + b_x^{(2)} \gamma_{t-x} + \varepsilon_{x,t}
+$$
+
+O índice $\gamma_{t-x}$ é comum a todos que nasceram no ano $t-x$. O Reino Unido é o exemplo canônico: as coortes nascidas entre 1925 e 1935 exibem taxas persistentemente menores que as vizinhas, efeito discutido desde @willets2004cohort. Em países como o Brasil, em que a série é curta e as coortes recentes ainda não atravessaram idades avançadas, o ganho empírico do modelo costuma ser modesto, e vale o lembrete de que complexidade extra só se paga quando há dado para estimá-la.
+
+## Estudo de caso: Lee-Carter do zero em Python
+
+Mais interessante do que colecionar variantes é entender o que cada peça faz. Nesta seção implementamos o Lee-Carter a partir da decomposição em valores singulares, projetamos $k_t$ via ARIMA com deriva e comparamos o resultado ao CBD nas idades avançadas. Em seguida traduzimos as taxas projetadas em objetos que o atuário reconhece: tábua de vida, expectativa remanescente, valor presente de anuidade.
+
+### Dados e preparação
+
+Usamos a biblioteca `pyhmfd`^[github.com/filipeclduarte/pyhmfd] para carregar dados reais da Human Mortality Database. A função `pyhmfd.load_hmd()` baixa e processa o arquivo `Mx_1x1.txt` de `mortality.org` e devolve um DataFrame com as taxas centrais de mortalidade ($m_{x,t}$) no formato largo — idades nas linhas, anos nas colunas. Para a tábua brasileira do IBGE (SIDRA 7362, $q_x$), usa-se `pyhmfd.load_ibge_sidra()` com a aproximação $m_x \approx q_x/(1-0{,}5\,q_x)$.
+
+::: {.callout-note}
+## Código completo no notebook
+O notebook `cap04-modelos-econometricos-atuariais-solucoes.ipynb` (pasta `notebooks/` do repositório) contém a implementação completa e executável deste estudo de caso. Os trechos a seguir destacam apenas os pontos-chave de cada etapa.
+:::
+
+```python
+import pyhmfd
+from scipy.linalg import svd
+
+# DataFrame largo: índice = idades, colunas = anos
+df   = pyhmfd.load_hmd(country="SWE", ages=range(0,91), years=range(1950,2021))
+m_xt = df.values          # array (91 idades × 71 anos)
+ln_m = np.log(m_xt)       # log-taxas — alvo do modelo
+```
+
+### Estimando Lee-Carter com SVD
+
+A estimação clássica do Lee-Carter passa por três passos simples. Primeiro, calcula-se $a_x$ como a média temporal de $\ln(m_{x,t})$ para cada idade. Depois, subtrai-se $a_x$ da matriz e aplica-se SVD: a primeira componente da decomposição dá, respectivamente, o vetor $b_x$ (vindo da matriz $U$) e o índice $k_t$ (vindo de $V$, escalado pelo maior valor singular). Como o produto $b_x \cdot k_t$ não muda se multiplicarmos um vetor por constante e dividirmos o outro, há liberdade de identificação; o convencionado por Lee e Carter é fixar $\sum_x b_x = 1$ e $\sum_t k_t = 0$, o que torna $b_x$ interpretável como proporção e $k_t$ centrado no período amostral.
+
+```python
+# Passo 1: perfil etário médio
+a_x = ln_m.mean(axis=1)
+
+# Passo 2 e 3: centraliza e aplica SVD
+U, S, Vt = svd(ln_m - a_x[:, None], full_matrices=False)
+
+# Passo 4: primeira componente
+b_x = U[:, 0] / U[:, 0].sum()      # normaliza: Σ b_x = 1
+k_t = S[0] * Vt[0, :] * U[:, 0].sum()
+k_t -= k_t.mean()                   # centra: Σ k_t = 0
+```
+
+A @fig-lc-parametros mostra os três parâmetros estimados para a Suécia (HMD, 1950–2020): $a_x$ exibe o perfil etário em U característico da mortalidade humana; $b_x$ é maior nas idades adultas, indicando onde o declínio secular é mais intenso; $k_t$ cai monotonicamente, confirmando a melhoria contínua da sobrevivência.
+
+```python
+import matplotlib.pyplot as plt
+
+anos  = df.columns.astype(int)
+idades = df.index.astype(int)
+
+fig, axes = plt.subplots(2, 2, figsize=(11, 8))
+
+axes[0, 0].plot(idades, a_x, 'b-')
+axes[0, 0].set(title=r'$a_x$ — perfil etário médio',
+               xlabel='Idade', ylabel=r'$\ln(m_x)$ médio')
+
+axes[0, 1].plot(idades, b_x, 'g-')
+axes[0, 1].set(title=r'$b_x$ — sensibilidade ao índice temporal',
+               xlabel='Idade', ylabel=r'$b_x$')
+
+axes[1, 0].plot(anos, k_t, 'r-')
+axes[1, 0].set(title=r'$k_t$ — índice temporal', xlabel='Ano', ylabel=r'$k_t$')
+
+idx60 = list(idades).index(60)
+axes[1, 1].plot(anos, ln_m[idx60, :], 'k-', label='Observado')
+axes[1, 1].plot(anos, a_x[idx60] + b_x[idx60] * k_t, 'r--', label='Ajustado')
+axes[1, 1].set(title='Ajuste vs. observado (idade 60)', xlabel='Ano')
+axes[1, 1].legend()
+
+plt.tight_layout()
+plt.savefig('../images/fig-lc-parametros.png', dpi=150, bbox_inches='tight')
+plt.show()
+```
+
+### Projetando $k_t$ no tempo
+
+O índice $k_t$ tem, na maior parte dos países, a aparência inconfundível de um passeio aleatório com deriva: cai ano a ano, com tropeços, mas sem reversão à média. A especificação usada por Lee e Carter — e adotada até hoje em relatórios oficiais — é justamente essa:
+
+$$
+k_t = k_{t-1} + d + \varepsilon_t
+$$
+
+A deriva $d$ é a melhoria média anual da mortalidade e $\varepsilon_t$ é ruído. Em termos de ARIMA, trata-se de um $(0,1,0)$ com constante. Simples assim. A simplicidade não é acidente: tentativas de modelos mais ricos (AR de ordens maiores, componentes ARMA) raramente produzem melhora estatisticamente defensável, e costumam piorar a projeção por sobreajuste.
+
+```python
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.arima.model import ARIMA
+
+# k_t é I(1): ADF não rejeita raiz unitária; Δk_t é estacionário
+adf_p  = adfuller(k_t)[1]          # tipicamente > 0.05
+adf_dp = adfuller(np.diff(k_t))[1] # tipicamente < 0.05
+
+# ARIMA(0,1,0) com constante = passeio aleatório com deriva
+resultado_k = ARIMA(k_t, order=(0,1,0), trend='c').fit()
+deriva = resultado_k.params['const']   # melhoria média anual
+```
+
+### Projetando a matriz inteira
+
+Com a deriva estimada e a variância dos choques em mãos, a projeção ponto a ponto de $k_t$ é um exercício de aritmética; o que exige cuidado é a incerteza. Usamos simulação de Monte Carlo para gerar mil trajetórias alternativas de $k_t$ no horizonte 2021–2050 e, a partir delas, extraímos percentis que viram intervalos de confiança para as taxas. Esse passo costuma surpreender o usuário iniciante: a incerteza cresce com $\sqrt{h}$ no horizonte $h$, de modo que projeções de muito longo prazo carregam margens amplas mesmo quando o ajuste in-sample parece impecável.
+
+```python
+# Projeção determinística de k_t (2021–2050)
+k_proj = k_t[-1] + deriva * np.arange(1, 31)
+
+# Monte Carlo: 1 000 trajetórias para intervalos de confiança
+sigma = np.std(np.diff(k_t))
+sims  = k_t[-1] + deriva * np.arange(1,31) + np.random.normal(0, sigma, (1000,30)).cumsum(axis=1)
+k_p05, k_p95 = np.percentile(sims, [5, 95], axis=0)
+
+# Reconstrói taxas: m_{x,t} = exp(a_x + b_x · k_t)
+m_proj = np.exp(a_x[:, None] + b_x[:, None] * k_proj[None, :])
+```
+
+A @fig-lc-projecao mostra a trajetória de $k_t$ e as taxas projetadas para as idades 0, 60 e 80, com o intervalo de confiança de 90% obtido por Monte Carlo. Note que a largura do intervalo cresce com $\sqrt{h}$: a incerteza de uma projeção até 2050 é consideravelmente maior do que até 2030, o que tem implicações diretas no dimensionamento de reservas de longo prazo.
+
+```python
+anos_proj = np.arange(anos[-1] + 1, anos[-1] + 31)
+
+fig, axes = plt.subplots(2, 2, figsize=(11, 8))
+
+# k_t histórico + projeção + IC 90%
+ax = axes[0, 0]
+ax.plot(anos, k_t, 'b-', label='Histórico')
+ax.plot(anos_proj, k_proj, 'r-', label='Projeção')
+ax.fill_between(anos_proj, k_p05, k_p95, alpha=0.2, color='red', label='IC 90%')
+ax.set(title=r'$k_t$ — índice temporal', xlabel='Ano', ylabel=r'$k_t$')
+ax.legend(fontsize=8)
+
+# Taxas projetadas por idade
+for ax, idade in zip(axes.flat[1:], [0, 60, 80]):
+    i = list(idades).index(idade)
+    ax.plot(anos, m_xt[i, :], 'b-', label='Histórico')
+    ax.plot(anos_proj, m_proj[i, :], 'r-', label='Projeção')
+    ax.set(title=f'Idade {idade}', xlabel='Ano', ylabel=r'$m_{x,t}$')
+    ax.legend(fontsize=8)
+
+plt.tight_layout()
+plt.savefig('../images/fig-lc-projecao.png', dpi=150, bbox_inches='tight')
+plt.show()
+```
+
+### Quão bem o modelo se ajusta aos dados?
+
+Antes de confiar na projeção é preciso olhar para o ajuste dentro da amostra. Calculamos o MAPE global, o $R^2$ por idade e o MAE por idade. A experiência acumulada com HMD sugere um padrão típico: o Lee-Carter se comporta muito bem no miolo da curva (idades de 30 a 70), começa a errar mais nas idades infantis — onde um único fator temporal não dá conta da queda vertiginosa da mortalidade infantil ao longo do século XX — e volta a degradar nas idades abertas, acima de 85, em que a amostra é pequena e os dados são ruidosos.
+
+```python
+m_fit = np.exp(a_x[:, None] + b_x[:, None] * k_t[None, :])
+
+ss_res     = ((m_xt - m_fit)**2).sum(axis=1)
+ss_tot     = ((m_xt - m_xt.mean(axis=1)[:,None])**2).sum(axis=1)
+r2_por_idade = 1 - ss_res / ss_tot   # > 0.95 no miolo, cai nas extremidades
+mape_global  = np.abs((m_xt - m_fit) / m_xt).mean() * 100
+```
+
+### Comparando Lee-Carter e CBD nas idades avançadas
+
+Como discutimos, o CBD foi pensado para os 60+. A comparação honesta acontece nesse recorte: ajustamos ambos os modelos apenas às idades a partir dos 60 e olhamos para o comportamento na idade 70, que está no centro dessa faixa e costuma aparecer como idade de aposentadoria em desenhos previdenciários. O que se espera ver: ajuste in-sample parecido, com vantagem marginal para o CBD, e projeções futuras razoavelmente próximas — a menos que a amostra capture um regime de mudança estrutural, caso em que os dois divergem.
+
+```python
+import statsmodels.api as sm
+
+# CBD — regressão OLS cross-sectional para cada ano (idades 60+)
+mask = idades >= 60
+x_bar = idades[mask].mean()
+X = np.column_stack([np.ones(mask.sum()), idades[mask] - x_bar])
+
+k1, k2 = zip(*[sm.OLS(ln_m[mask, t], X).fit().params for t in range(n_anos)])
+k1, k2 = np.array(k1), np.array(k2)
+
+# Projeção por deriva constante
+k1_proj = k1[-1] + np.diff(k1).mean() * np.arange(1, 31)
+k2_proj = k2[-1] + np.diff(k2).mean() * np.arange(1, 31)
+```
+
+O código abaixo reconstrói as taxas CBD para a idade 70 e plota a comparação.
+
+```python
+idx70 = list(idades[mask]).index(70)
+
+# Ajuste in-sample CBD para a idade 70
+logit_fit_cbd = k1 + k2 * (70 - x_bar)
+m_fit_cbd70 = np.exp(logit_fit_cbd) / (1 + np.exp(logit_fit_cbd))
+
+# Projeção CBD para a idade 70
+logit_proj_cbd = k1_proj + k2_proj * (70 - x_bar)
+m_proj_cbd70   = np.exp(logit_proj_cbd) / (1 + np.exp(logit_proj_cbd))
+
+# Ajuste e projeção LC para a idade 70
+i70 = list(idades).index(70)
+m_fit_lc70  = np.exp(a_x[i70] + b_x[i70] * k_t)
+m_proj_lc70 = np.exp(a_x[i70] + b_x[i70] * k_proj)
+
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(anos, m_xt[i70, :], 'k-', label='Observado', linewidth=1.5)
+ax.plot(anos, m_fit_lc70, 'b--', label='LC ajustado')
+ax.plot(anos_proj, m_proj_lc70, 'b-', label='LC projeção')
+ax.plot(anos, m_fit_cbd70, 'r--', label='CBD ajustado')
+ax.plot(anos_proj, m_proj_cbd70, 'r-', label='CBD projeção')
+ax.axvline(anos[-1], color='gray', linestyle=':', linewidth=1)
+ax.set(title='LC vs. CBD — taxa de mortalidade, idade 70 (Suécia)',
+       xlabel='Ano', ylabel=r'$m_{70,t}$')
+ax.legend(ncol=2, fontsize=9)
+plt.tight_layout()
+plt.savefig('../images/fig-lc-vs-cbd.png', dpi=150, bbox_inches='tight')
+plt.show()
+```
+
+A @fig-lc-vs-cbd compara as projeções dos dois modelos para a idade 70. O ajuste in-sample é próximo; as diferenças emergem no horizonte longo, onde as hipóteses de deriva constante dos dois fatores do CBD e do único fator do Lee-Carter podem divergir.
+
+### Do modelo à mesa do atuário
+
+Nada do que fizemos até aqui importa se não chegarmos à tábua de vida. A partir das taxas $m_{x,t}$ projetadas, construímos $\ell_x$ (sobreviventes), $d_x$ (óbitos), $L_x$ (pessoas-ano vividas) e, finalmente, $e_x$ (expectativa remanescente). O bloco a seguir faz essa ponte para três momentos — 2020, 2035 e 2050 — e calcula a expectativa aos 60 e a probabilidade de alguém com 60 chegar aos 80. São justamente os números que a área técnica de uma seguradora e de um regime próprio de previdência olham primeiro.
+
+```python
+def tabua_e_expectativa(m_vec, idades_vec, x0=60):
+    """Calcula l_x e e_{x0} a partir de um vetor de taxas m_x."""
+    q = m_vec / (1 + 0.5 * m_vec)        # m_x → q_x
+    l = np.cumprod(np.concatenate([[1], 1 - q[:-1]]))  # sobreviventes
+    i0 = np.where(idades_vec == x0)[0][0]
+    L  = (l[:-1] + l[1:]) / 2            # pessoas-ano
+    e  = L[i0:].sum() / l[i0]            # expectativa remanescente
+    return l, e
+
+# Compara e_60 em 2020 e 2050
+_, e60_2020 = tabua_e_expectativa(m_xt[:, -1],  idades)
+_, e60_2050 = tabua_e_expectativa(m_proj[:, -1], idades)
+print(f"e_60  em 2020: {e60_2020:.1f} anos")
+print(f"e_60  em 2050: {e60_2050:.1f} anos  (+{e60_2050-e60_2020:.1f} anos de longevidade adicional)")
+```
+
+## Fechamento
+
+O que o leitor leva deste capítulo não é um catálogo de modelos, mas uma família pequena de ideias que se combinam. Primeiro, que uma matriz idade × tempo pode ser resumida por poucos fatores interpretáveis; o SVD é a ferramenta natural para isso. Segundo, que o tempo, mesmo em mortalidade, se comporta tão mal quanto em macroeconomia — o $k_t$ é não estacionário e o que se projeta é a sua deriva, não o seu nível. Terceiro, que as extensões não são melhores *a priori*: o CBD ganha nos 60+, o Renshaw-Haberman ganha onde há efeito de coorte documentado, e em ambos os casos o preço é exigir mais da amostra.
+
+Para quem vai trabalhar na indústria, vale o lembrete prático: antes de qualquer modelo de mortalidade sofisticado, convém saber qual tábua a SUSEP aceita na precificação de um plano de previdência, qual projeção o IBGE publicou na última revisão da população, e como o atuário responsável de uma seguradora específica já vinha fazendo essas contas. Modelos existem para melhorar decisões, não para substituir a conversa com a área técnica.
+
+Encerramos aqui a Parte I. A Parte II troca o paradigma: em vez de especificar uma equação e estimar poucos parâmetros, deixaremos a rede aprender a representação direto dos dados. Veremos que nada disso é mágico — e que, em boa parte dos problemas discutidos aqui, um Lee-Carter bem feito continua competitivo frente a arquiteturas bem maiores.
+
+## Exercícios propostos
+
+**4.1** — Baixe os arquivos `Mx_1x1` do Japão na HMD, para homens e mulheres, no período 1950–2020. Ajuste um Lee-Carter separado para cada sexo e projete as taxas até 2040. Calcule a expectativa de vida ao nascer $e_0$ ano a ano e observe a evolução do diferencial entre os sexos. A diferença está aumentando ou diminuindo? Que interpretação demográfica você daria para o padrão observado?
+
+**4.2** — Use o mesmo Reino Unido que aparece em toda a literatura sobre efeito de coorte. Separe o período em 1950–2000 (treino) e 2001–2020 (teste). Ajuste Lee-Carter e CBD apenas nas idades de 60 a 89. Calcule MAE e RMSE para cada idade no período de teste. Em que faixa etária cada modelo leva a melhor? O padrão é compatível com a motivação original do CBD?
+
+**4.3** — Baixe a Tábua Completa de Mortalidade do IBGE via SIDRA (tabela 7362) para ambos os sexos, desde o primeiro ano disponível. Converta $q_x$ em $m_x$ pela aproximação usual, ajuste um Lee-Carter e projete $e_0$ até 2060. Compare com a projeção oficial que o IBGE publica na Revisão da Projeção da População. Onde os números divergem? O que isso sugere sobre a hipótese implícita em cada abordagem?
+
+**4.4** — Implemente o modelo Renshaw-Haberman com estimação iterativa, partindo das estimativas de Lee-Carter como ponto inicial. Compare o ajuste in-sample dos dois no Reino Unido. O efeito de coorte estimado recupera de fato a geração de 1925–1935 destacada em @willets2004cohort? Discuta, em uma ou duas páginas, se o ganho compensa a maior demanda computacional e de interpretação.
+
+**4.5** — O pressuposto de $b_x$ constante no tempo é central ao Lee-Carter. Proponha — e, se possível, implemente — uma extensão em que $b_x(t)$ varie suavemente ao longo do tempo (por exemplo, via *splines* de baixa dimensão no tempo). Ajuste ao Japão e ao Reino Unido e verifique se a variação estimada de $b_x$ é economicamente relevante ou dominada por ruído.
+
+**4.6** — A partir das taxas projetadas de um dos exercícios acima, calcule o valor presente atuarial de uma anuidade vitalícia unitária para uma pessoa de 65 anos, a uma taxa real de desconto de 4% a.a. Compare dois cenários: (i) usando as taxas projetadas para cada idade futura; (ii) congelando as taxas do ano inicial. Quanto a longevidade projetada adiciona à reserva necessária? Repita o exercício para 3%, 4% e 5% — em quanto a conclusão depende do juro assumido?
+
+### Sobre as resoluções
+
+Os notebooks com código comentado estão no repositório do livro (`github.com/filipeduarte/book-project`), na pasta `pt-br/notebooks/`. Recomendo tentar o exercício por conta própria antes de abrir o notebook: o valor pedagógico de bater a cabeça em um SVD que não converge é insubstituível.

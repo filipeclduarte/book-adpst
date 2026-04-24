@@ -1,0 +1,234 @@
+# Avaliação Rigorosa de Modelos de Previsão {#sec-cap02}
+
+> "Todos os modelos estão errados, mas alguns são úteis."
+> --- George E. P. Box [@box2015time].
+
+O Capítulo 1 delimitou o terreno — o que é uma série temporal, por que ela merece tratamento próprio, quais os *datasets* que vão nos acompanhar. Antes de entrar em qualquer modelo específico, dos *baselines* estatísticos do Capítulo 3 às redes profundas da Parte II, falta combinar como vamos julgar se um modelo é bom. Sem esse acordo prévio, qualquer afirmação do tipo "método X supera método Y" vira, na melhor das hipóteses, anedota; na pior, dogma disfarçado. Este capítulo é uma caixa de ferramentas: particionamento temporal que não trapaceia, escolha consciente de métricas, quantificação de incerteza e testes formais de diferença entre modelos.
+
+Quem vem do aprendizado supervisionado clássico vai precisar deixar alguns reflexos de lado. O *k-fold* aleatório, confortável em dados de corte transversal, aqui é um erro grave — e já vamos ver por quê. O MAPE, métrica que todo mundo reporta, carrega patologias conhecidas há décadas [@armstrong1992error; @hyndman2006another]. E o fato de o modelo A ter MAE de 3,12 e o modelo B de 3,08 no mesmo conjunto de teste, por si só, não diz nada sobre qual é melhor — a diferença pode ser puro ruído amostral.
+
+## Por que a avaliação em séries temporais é diferente
+
+A diferença entre avaliar um classificador de imagens e um modelo de previsão de séries temporais se resume a uma palavra: **ordem**. Em problemas i.i.d., as observações são permutáveis; por isso podemos embaralhar tudo, separar aleatoriamente em treino, validação e teste e dormir tranquilo. Em séries temporais, esse embaralhamento é catastrófico, ainda que de forma silenciosa: o modelo acaba treinando com informação que, na vida real, ele não teria — ou seja, usa o futuro para prever o passado [@bergmeir2018note; @hyndman2021forecasting].
+
+A consequência prática é direta. Qualquer partição entre treino, validação e teste precisa respeitar a flecha do tempo. Teste é sempre o bloco mais recente; validação, o bloco imediatamente anterior; treino, tudo que vem antes. Isso parece autoevidente, mas é violado com frequência assustadora na prática — em especial em trabalhos que aplicam aprendizado de máquina genérico sem adaptá-lo ao contexto temporal [@hewamalage2021recurrent].
+
+Existe também uma razão mais substantiva para tanto cuidado. Em ciências sociais, o valor de um modelo não está em reconstruir o passado — está em antecipar o futuro. E o processo gerador dos dados muda: regimes de política monetária são substituídos, pandemias alteram padrões de consumo e mortalidade, mudanças regulatórias reconfiguram o mercado de seguros. Um protocolo de avaliação honesto precisa reconhecer que o futuro não é uma amostra i.i.d. do passado — é, no melhor dos cenários, uma extrapolação condicionada à estabilidade das estruturas subjacentes [@petropoulos2022forecasting; @makridakis2020forecasting].
+
+## Treinamento, validação e teste: o ciclo de aprendizado
+
+Antes de entrar em esquemas específicos de particionamento, vale fixar o que significa, de fato, "treinar" e "avaliar" um modelo. Qualquer modelo preditivo — de uma regressão linear a um *Transformer* — é definido por um conjunto de parâmetros $\boldsymbol{\theta}$ e uma família de funções $f(\mathbf{x}; \boldsymbol{\theta})$. **Treinar** é procurar os valores de $\boldsymbol{\theta}$ que minimizam uma função de perda $\mathcal{L}$ sobre dados conhecidos; **avaliar** é medir o desempenho de $f(\cdot; \hat{\boldsymbol{\theta}})$ em dados que o modelo nunca viu. Separar esses dois momentos é o que sustenta toda a ideia de generalização.
+
+### O que acontece no treinamento
+
+Formalmente, dado um conjunto de treino $\mathcal{D}_{\text{tr}} = \{(\mathbf{x}_t, y_t)\}_{t=1}^{n}$ e uma função de perda $\ell(y, \hat{y})$ — tipicamente $\ell(y, \hat{y}) = (y - \hat{y})^2$ para regressão, ou a verossimilhança negativa para modelos probabilísticos — treinar é resolver:
+
+$$
+\hat{\boldsymbol{\theta}} = \arg\min_{\boldsymbol{\theta}} \; \frac{1}{n} \sum_{t=1}^{n} \ell\!\left(y_t, f(\mathbf{x}_t; \boldsymbol{\theta})\right) + \lambda \, \Omega(\boldsymbol{\theta}),
+$$
+
+em que $\Omega(\boldsymbol{\theta})$ é um termo de **regularização** (por exemplo, $\|\boldsymbol{\theta}\|_2^2$) e $\lambda \geq 0$ controla sua intensidade. Modelos lineares com perda quadrática têm solução analítica — são as equações normais da regressão linear. Redes neurais e a maioria dos modelos modernos, não: a solução sai iterativamente por **descida de gradiente** ou variantes adaptativas (SGD, Adam, RMSprop), detalhadas no @sec-cap05. Começa-se em $\boldsymbol{\theta}_0$ e itera-se $\boldsymbol{\theta}_{k+1} = \boldsymbol{\theta}_k - \eta \nabla_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta}_k)$ até a perda estabilizar em um mínimo local.
+
+Treinar, então, é um procedimento que *consome* os dados de treino para calibrar parâmetros. Qualquer métrica calculada depois sobre esse mesmo conjunto é **otimisticamente enviesada** — o modelo foi escolhido justamente para ir bem ali. Um erro baixo no treino, portanto, não atesta qualidade preditiva: atesta apenas que a otimização funcionou.
+
+### Os três papéis: treino, validação e teste
+
+A divisão de tarefas é a seguinte. O **treino** fornece os pares $(\mathbf{x}_t, y_t)$ que o otimizador consome. A **validação** funciona como um espelho independente, usado para decisões de segundo nível — número de defasagens, número de camadas, *learning rate*, critério de *early stopping*, comparação entre candidatos. Aqui moram os **hiperparâmetros**. O **teste**, por fim, é uma reserva intocada, consultada uma única vez ao final, que fornece a estimativa honesta do erro de generalização.
+
+Misturar os papéis de validação e teste é um erro metodológico frequente e com consequências severas. Se eu usar o teste para escolher entre uma LSTM e uma TCN, o erro de teste deixa de ser uma estimativa honesta — implicitamente, eu estava treinando sobre ele. Esse fenômeno atende por *test-set contamination* na literatura e compromete todas as comparações que vêm depois [@hastie2009elements, cap. 7]. A regra operacional é simples, ainda que desconfortável: o teste é examinado exatamente uma vez. Qualquer nova iteração depois desse olhar, em princípio, exige um novo teste.
+
+Em séries temporais há uma restrição adicional: a partição precisa preservar a ordem cronológica. Treino vem antes de validação, que vem antes de teste. Nunca o contrário, nunca embaralhado.
+
+### *Data leakage*: os vazamentos silenciosos
+
+*Data leakage* acontece quando informação que não estaria disponível no momento da previsão real acaba contaminando treino ou validação. Em séries temporais, os vazamentos costumam ser sutis. **Normalização global** — média e desvio-padrão calculados sobre a série inteira antes de particionar — vaza estatísticas do teste para o treino; o certo é calcular só no treino e aplicar ao teste. **Seleção de variáveis por correlação com o alvo** usando a série inteira tem o mesmo vício. **Imputação de valores faltantes** com médias ou modelos ajustados em todo o período também vaza futuro. E **variáveis exógenas** que só ficam disponíveis com defasagem real (o PIB trimestral, divulgado com dois meses de atraso) tratadas como se fossem contemporâneas ao alvo produzem modelos que simplesmente não rodam em produção. Cada uma dessas práticas inflaciona o desempenho medido e gera frustração quando o modelo vai para a vida real. Detectá-las exige menos truque e mais disciplina: para cada variável usada, vale a pergunta mental "isso estaria disponível no instante $t$ se eu estivesse prevendo de verdade?".
+
+### Overfitting e underfitting: o dilema viés-variância
+
+Todo modelo vive uma tensão entre **capacidade** e **generalização**. Um modelo com capacidade insuficiente — poucos parâmetros, forma funcional muito restrita — não captura a estrutura dos dados e apresenta erro alto em treino e em teste; esse regime é o **underfitting**. Um modelo com capacidade demais para o tamanho da amostra memoriza as idiossincrasias do treino, inclusive o ruído, e exibe erro muito baixo em treino mas alto em teste; é o **overfitting**. Entre os dois extremos há uma faixa de capacidade em que o erro de generalização é mínimo — e é dela que queremos chegar perto.
+
+A formalização clássica desse fenômeno é a **decomposição viés-variância**. Para um estimador $\hat{f}$ de uma função verdadeira $f^*$, o erro quadrático esperado em um ponto $\mathbf{x}$ decompõe-se em:
+
+$$
+\mathbb{E}\!\left[(y - \hat{f}(\mathbf{x}))^2\right] = \underbrace{\left(f^*(\mathbf{x}) - \mathbb{E}[\hat{f}(\mathbf{x})]\right)^2}_{\text{viés}^2} + \underbrace{\mathbb{V}\!\left[\hat{f}(\mathbf{x})\right]}_{\text{variância}} + \underbrace{\sigma^2}_{\text{ruído irredutível}}.
+$$
+
+Modelos subajustados têm viés alto (a forma funcional não consegue reproduzir $f^*$) e variância baixa (pouco dependem do treino específico). Modelos sobreajustados são flexíveis o bastante para reproduzir $f^*$ — viés baixo — mas sua variância é alta: pequenas mudanças nos dados de treino geram estimadores muito diferentes. O ruído irredutível $\sigma^2$ fixa o piso: nenhuma metodologia, por mais sofisticada, prevê o componente genuinamente aleatório do processo.
+
+O diagnóstico prático usa treino e validação em conjunto. Quando ambos os erros são altos e próximos, há **underfitting** — aumentar a capacidade (mais defasagens, mais parâmetros, mais camadas) ou enriquecer os atributos costuma ajudar. Quando o treino é muito menor que a validação, há **overfitting** — e aí entra o arsenal habitual: regularização $\ell_1$/$\ell_2$, *dropout*, *early stopping*, redução da capacidade, ou simplesmente mais dados. Em séries temporais há uma fonte adicional de problema: defasagens em excesso. Cada defasagem extra é um parâmetro extra, e em amostras pequenas isso leva rapidamente o modelo a memorizar ruído.
+
+A curva de aprendizado — erro de treino e erro de validação ao longo das épocas, ou em função do tamanho do treino — é a ferramenta visual canônica. Se os dois erros caem juntos e estacionam em patamar baixo, o ajuste está bom. Se caem juntos mas ficam altos, é underfitting. E se o erro de validação começa a subir enquanto o de treino continua caindo — aquele "V" clássico — é overfitting em estado puro, e é exatamente esse sinal que o *early stopping* monitora para decidir quando parar. Esse gráfico vai aparecer muitas vezes nos estudos de caso da Parte II.
+
+Uma ressalva específica às séries temporais: o fenômeno do *double descent* [@belkin2019reconciling], em que modelos absurdamente sobreparametrizados generalizam bem em aprendizado supervisionado clássico, não se transfere automaticamente para séries com amostras pequenas e processos não estacionários — que é o contexto típico das ciências sociais aplicadas. A recomendação conservadora continua valendo: capacidade proporcional ao tamanho da amostra, regularização ativa, validação temporal honesta.
+
+## Particionamento temporal
+
+A forma mais simples e didática é a **separação em três blocos contíguos**: treino, validação e teste, sempre nessa ordem cronológica. O treino estima parâmetros; a validação ajusta hiperparâmetros e compara candidatos; o teste, mantido em reserva até o fim, fornece a estimativa honesta de desempenho fora da amostra. A prática saudável é olhar para o teste uma vez só, com a modelagem já concluída — qualquer iteração que o use como sinal de ajuste o corrompe.
+
+Essa divisão simples tem um problema: um único conjunto de teste gera uma única estimativa do erro de generalização, e frequentemente com alta variância. Para reduzir esse problema, entra a **validação cruzada temporal**, em duas variantes principais — janelas expansivas ou janelas deslizantes.
+
+A **janela expansiva** (também conhecida como *time-series cross-validation* ou validação de Hyndman) faz o treino crescer a cada dobra: treina-se com $[1, t]$ e avalia-se em $[t+1, t+h]$; depois treina-se com $[1, t+h]$ e avalia-se em $[t+h+1, t+2h]$; e assim por diante. A métrica final é a média (ou a mediana) dos erros das $k$ dobras. É um esquema que aproveita toda a informação disponível até cada previsão e é o padrão recomendado em @hyndman2021forecasting.
+
+A **janela deslizante** (*rolling window*) mantém o treino com tamanho fixo $w$ e desliza ao longo da série, sempre avaliando em um horizonte $h$ imediatamente posterior. Faz sentido quando há boas razões para acreditar que o processo gerador mudou e que observações muito antigas deixaram de ser informativas — o que é comum na macroeconomia brasileira ao se cruzar, por exemplo, o Plano Real.
+
+Um resultado a registrar: @bergmeir2018note mostra que, para séries estacionárias e modelos puramente autorregressivos, o *k-fold* padrão produz estimativas assintoticamente válidas — contra a intuição de que todo embaralhamento é proibido. É um resultado técnico e específico; na prática, especialmente em séries não estacionárias como as que aparecem em ciências sociais, a recomendação continua a mesma: validação temporal, não aleatória.
+
+A @fig-temporal-cv ilustra graficamente as duas variantes de validação cruzada temporal sobre uma série hipotética com $T = 12$ observações e horizonte de previsão $h = 2$.
+
+![Validação cruzada temporal: janela expansiva versus janela deslizante. No painel superior, a série temporal completa. No painel intermediário, a janela expansiva: o treino (azul) cresce a cada dobra, incorporando todas as observações anteriores, enquanto o teste (laranja) avança $h = 2$ passos. No painel inferior, a janela deslizante: o treino mantém tamanho fixo $w = 4$ e desliza para a frente, descartando as observações mais antigas (cinza).](../images/fig-temporal-cv.png){#fig-temporal-cv width=95%}
+
+Na expansiva, o treino cresce a cada dobra e vai acumulando informação; na deslizante, $w$ fica fixo e as observações antigas são descartadas. Em ambos os casos, a métrica de validação final é a média (ou mediana) dos erros das $k$ dobras: $\overline{\mathrm{Erro}} = k^{-1} \sum_{i=1}^{k} \mathrm{Erro}_i$. Nenhuma observação do teste final — os blocos mais recentes, que nem aparecem no diagrama — participa desse procedimento: ela só vai ser consultada uma vez, no fim de tudo.
+
+## Métricas de acurácia pontual
+
+Não existe métrica universalmente superior. A escolha depende da escala da série, da presença de zeros, da distribuição dos erros e, mais do que tudo, do custo de cada tipo de erro no contexto aplicado. Esta seção apresenta as métricas mais usadas, suas definições formais, seus minimizadores em expectativa e as armadilhas de cada uma. Na notação, $y_t$ é o valor observado no instante $t$, $\hat{y}_t$ é a previsão do modelo, $e_t = y_t - \hat{y}_t$ é o erro pontual, e $T$ é o número de observações sobre o qual a métrica é calculada.
+
+### Métricas absolutas: MAE e RMSE
+
+O **erro absoluto médio** (MAE, *Mean Absolute Error*) é definido como
+
+$$
+\mathrm{MAE} = \frac{1}{T} \sum_{t=1}^{T} |y_t - \hat{y}_t| = \frac{1}{T} \sum_{t=1}^{T} |e_t|.
+$$
+
+O MAE está na mesma unidade da variável e tem uma propriedade estatística notável: seu minimizador populacional é a mediana condicional. Isto é, se o modelo busca minimizar $\mathbb{E}[|Y_t - \hat{y}_t| \mid \mathcal{F}_{t-1}]$, onde $\mathcal{F}_{t-1}$ é a informação disponível até $t-1$, então o minimizador é $\hat{y}_t^\star = \mathrm{mediana}(Y_t \mid \mathcal{F}_{t-1})$. Essa propriedade torna o MAE particularmente adequado em contextos com distribuições assimétricas ou caudas pesadas --- situação comum em séries financeiras e de seguros.
+
+A **raiz do erro quadrático médio** (RMSE, *Root Mean Squared Error*) é
+
+$$
+\mathrm{RMSE} = \sqrt{\frac{1}{T} \sum_{t=1}^{T} (y_t - \hat{y}_t)^2} = \sqrt{\mathrm{MSE}}.
+$$
+
+Por elevar o erro ao quadrado, o RMSE penaliza desproporcionalmente erros grandes --- um erro de magnitude 10 contribui cem vezes mais do que um erro de magnitude 1. Seu minimizador populacional é a média condicional, $\hat{y}_t^\star = \mathbb{E}[Y_t \mid \mathcal{F}_{t-1}]$, propriedade que alinha o RMSE naturalmente com estimadores de mínimos quadrados e com redes neurais treinadas por descida de gradiente sobre a perda quadrática. O MSE admite a célebre decomposição viés-variância,
+
+$$
+\mathbb{E}[(Y - \hat{Y})^2] = \underbrace{(\mathbb{E}[\hat{Y}] - \mathbb{E}[Y])^2}_{\text{viés}^2} + \underbrace{\mathrm{Var}(\hat{Y})}_{\text{variância}} + \underbrace{\mathrm{Var}(Y)}_{\text{ruído irredutível}},
+$$
+
+que fornece o vocabulário padrão para discutir *trade-offs* entre modelos excessivamente simples (alto viés) e excessivamente complexos (alta variância) [@hyndman2006another].
+
+Como regra prática, se a distribuição do erro for aproximadamente simétrica e sem caudas pesadas, RMSE e MAE conduzem a conclusões similares; em presença de *outliers*, o MAE é mais robusto.
+
+### Métricas percentuais: MAPE e sMAPE
+
+O **MAPE** (*Mean Absolute Percentage Error*) é
+
+$$
+\mathrm{MAPE} = \frac{100\%}{T} \sum_{t=1}^{T} \left| \frac{y_t - \hat{y}_t}{y_t} \right|.
+$$
+
+Sua aparente virtude --- invariância à escala e interpretação percentual direta --- esconde patologias sérias. Primeiro, o MAPE é indefinido sempre que $y_t = 0$ e tende a infinito quando $y_t \to 0$, o que o torna inadequado para séries com zeros ou valores próximos de zero (sinistralidade em seguros, contagens de eventos raros). Segundo, é assimétrico em torno do valor verdadeiro: uma subprevisão ($\hat{y}_t = 0{,}5 \, y_t$) produz erro percentual de 50%, enquanto uma superprevisão simétrica ($\hat{y}_t = 1{,}5 \, y_t$) produz o mesmo 50% --- mas uma superprevisão de $\hat{y}_t = 2 y_t$ produz 100%, ao passo que nenhuma subprevisão pode exceder 100%. Essa assimetria induz otimizadores a preferirem, sistematicamente, subprevisões [@armstrong1992error; @hyndman2006another].
+
+O **sMAPE** (*symmetric MAPE*), introduzido como tentativa de corrigir a assimetria, é
+
+$$
+\mathrm{sMAPE} = \frac{100\%}{T} \sum_{t=1}^{T} \frac{2\,|y_t - \hat{y}_t|}{|y_t| + |\hat{y}_t|}.
+$$
+
+O sMAPE é limitado superiormente por 200%, o que resolve o problema de valores explosivos, mas introduz novos: deixa de ser uma função coerente da magnitude do erro e pode, em certos regimes, recompensar previsões de sinal trocado. A recomendação amplamente aceita na literatura atual é evitar o MAPE em contextos de pesquisa e preferir métricas baseadas em escalonamento por uma previsão ingênua, apresentadas a seguir.
+
+### MASE e a ideia de escalonamento por baseline
+
+O **MASE** (*Mean Absolute Scaled Error*), proposto por @hyndman2006another, é a métrica recomendada como padrão para comparações em escalas heterogêneas. A ideia é comparar o erro do modelo ao erro de uma previsão ingênua de referência, computada sobre o conjunto de treino. Para uma série não sazonal de tamanho $n$ no treino, a previsão ingênua é $\hat{y}_t^{\text{naive}} = y_{t-1}$, e o MAE correspondente vale
+
+$$
+\mathrm{MAE}_{\text{naive}} = \frac{1}{n-1} \sum_{i=2}^{n} |y_i - y_{i-1}|.
+$$
+
+Para uma série com sazonalidade de período $m$ (por exemplo, $m = 12$ para dados mensais com sazonalidade anual), usa-se a previsão ingênua sazonal $\hat{y}_t^{\text{naive}} = y_{t-m}$, e
+
+$$
+\mathrm{MAE}_{\text{naive}}^{\text{sazonal}} = \frac{1}{n-m} \sum_{i=m+1}^{n} |y_i - y_{i-m}|.
+$$
+
+O MASE é então definido como
+
+$$
+\mathrm{MASE} = \frac{\frac{1}{T} \sum_{t=1}^{T} |y_t - \hat{y}_t|}{\mathrm{MAE}_{\text{naive}}}.
+$$
+
+Três propriedades tornam o MASE especialmente atrativo. Primeiro, $\mathrm{MASE} = 1$ corresponde exatamente ao desempenho da previsão ingênua; valores abaixo de 1 indicam que o modelo supera a naïve, e valores acima de 1 indicam desempenho inferior à referência mais simples possível. Segundo, a métrica é bem definida sempre que a série não seja constante no treino (condição trivialmente satisfeita em aplicações reais). Terceiro, é invariante à escala, permitindo agregação honesta sobre coleções heterogêneas de séries. Essas propriedades justificam sua adoção como métrica padrão nas competições M4 e M5 [@makridakis2018m4; @makridakis2022m5].
+
+### OWA: combinando métricas em ranking agregado
+
+A competição M4 introduziu uma métrica composta, o **OWA** (*Overall Weighted Average*), para ranquear participantes em uma coleção de 100 mil séries. O OWA combina sMAPE e MASE, cada qual normalizado pelo desempenho de uma previsão de referência --- a *Naïve 2* (naïve ajustada por decomposição sazonal) ---, na forma
+
+$$
+\mathrm{OWA} = \frac{1}{2}\left( \frac{\mathrm{sMAPE}_{\text{modelo}}}{\mathrm{sMAPE}_{\text{naïve2}}} + \frac{\mathrm{MASE}_{\text{modelo}}}{\mathrm{MASE}_{\text{naïve2}}} \right).
+$$
+
+Valores de OWA abaixo de 1 indicam que o modelo supera, em média, a referência Naïve 2 nos dois critérios combinados. O OWA é útil quando se deseja um único número para ranqueamento global, mas a recomendação em publicações científicas permanece reportar as métricas componentes separadamente, para permitir ao leitor diagnosticar em qual dimensão um modelo se destaca ou fraqueja.
+
+## Previsão probabilística e métricas apropriadas
+
+Até aqui, tratamos a previsão como um valor pontual $\hat{y}_t$. Em muitas aplicações de ciências sociais aplicadas, porém, a grandeza relevante não é um número, mas uma distribuição: o atuário precisa de quantis da distribuição de sinistros para calcular reservas; o analista de risco macroeconômico precisa de intervalos de confiança para cenários de inflação; o gestor de estoques precisa de percentis altos da demanda para definir níveis de serviço. Avaliar apenas a previsão pontual ignora essa dimensão.
+
+A avaliação de previsões probabilísticas apoia-se em **regras de pontuação estritamente próprias** (*strictly proper scoring rules*), formalizadas por @gneiting2007strictly. Formalmente, seja $S(F, y)$ uma função que avalia uma distribuição preditiva $F$ à luz da observação realizada $y$. A regra $S$ é **própria** se, para toda distribuição verdadeira $G$ e toda distribuição alternativa $F$, vale $\mathbb{E}_{Y \sim G}[S(G, Y)] \le \mathbb{E}_{Y \sim G}[S(F, Y)]$ (aqui $S$ é uma perda, que desejamos minimizar); é **estritamente própria** quando a igualdade ocorre apenas se $F = G$. Essa propriedade alinha os incentivos: o modelo não ganha nada em expectativa sendo desonesto sobre sua incerteza, e a honestidade é a única estratégia ótima.
+
+A **perda pinball** (também chamada *quantile loss*) avalia previsões de quantis individuais. Para um quantil-alvo $\tau \in (0,1)$ e uma previsão $\hat{q}_\tau$ do quantil condicional, a perda é
+
+$$
+\rho_\tau(y, \hat{q}_\tau) = \begin{cases} \tau\,(y - \hat{q}_\tau), & \text{se } y \ge \hat{q}_\tau, \\ (\tau - 1)\,(y - \hat{q}_\tau), & \text{se } y < \hat{q}_\tau, \end{cases}
+$$
+
+equivalentemente escrita como $\rho_\tau(y, \hat{q}_\tau) = (y - \hat{q}_\tau)\,(\tau - \mathbb{1}\{y < \hat{q}_\tau\})$. Para $\tau = 0{,}5$, a perda pinball se reduz a metade do erro absoluto, recuperando o MAE como caso particular. Minimizar $\mathbb{E}[\rho_\tau(Y, \hat{q}) \mid \mathcal{F}_{t-1}]$ produz exatamente o quantil condicional de ordem $\tau$, resultado clássico em @koenker2005quantile, razão pela qual essa função de perda é a escolha natural para redes neurais que produzem previsões de múltiplos quantis, como o *Temporal Fusion Transformer* [@lim2021temporal].
+
+O **CRPS** (*Continuous Ranked Probability Score*) avalia a distribuição preditiva inteira. Sendo $F$ a função de distribuição cumulativa prevista e $y$ a observação realizada, o CRPS é
+
+$$
+\mathrm{CRPS}(F, y) = \int_{-\infty}^{\infty} \big(F(z) - \mathbb{1}\{y \le z\}\big)^2 \, dz.
+$$
+
+Uma forma alternativa, frequentemente mais conveniente para cálculo com amostras, é a representação via diferenças esperadas:
+
+$$
+\mathrm{CRPS}(F, y) = \mathbb{E}_{Y \sim F} |Y - y| - \tfrac{1}{2}\,\mathbb{E}_{Y, Y' \sim F} |Y - Y'|,
+$$
+
+onde $Y$ e $Y'$ são amostras independentes de $F$. Uma conexão notável amarra as duas regras: o CRPS é a integral da perda pinball sobre todos os níveis de quantil,
+
+$$
+\mathrm{CRPS}(F, y) = 2 \int_0^1 \rho_\tau\big(y, F^{-1}(\tau)\big)\, d\tau,
+$$
+
+resultado que oferece duas interpretações complementares --- o CRPS como pontuação agregada sobre toda a distribuição e a perda pinball como avaliação localizada em cada quantil. Quando a distribuição preditiva degenera em um ponto ($F = \delta_{\hat{y}}$), o CRPS se reduz ao erro absoluto $|y - \hat{y}|$, ligando diretamente a avaliação probabilística à avaliação pontual.
+
+Outras regras próprias aparecem com frequência na literatura aplicada. O **escore logarítmico**, $S_{\log}(F, y) = -\log f(y)$ onde $f$ é a densidade prevista, é a base da verossimilhança preditiva e é estritamente próprio, mas extremamente sensível a caudas (um único valor na cauda pode dominar a métrica). Para intervalos, a **probabilidade de cobertura empírica** (PICP, *Prediction Interval Coverage Probability*) de um intervalo de nível nominal $1-\alpha$ é $\mathrm{PICP} = T^{-1} \sum_t \mathbb{1}\{L_t \le y_t \le U_t\}$, e deve ser reportada em conjunto com a largura média do intervalo, pois intervalos excessivamente largos podem atingir cobertura alta ao custo de serem informacionalmente vazios.
+
+Uma alternativa moderna e elegante à quantificação de incerteza é a **previsão conformal**, que produz intervalos com cobertura finita garantida sob hipóteses de troca (*exchangeability*) das observações [@angelopoulos2023conformal]. Em séries temporais, a hipótese de troca é, em geral, violada, e adaptações específicas são necessárias; ainda assim, o arcabouço conformal tem se consolidado como ferramenta complementar valiosa, especialmente para modelos de aprendizado profundo que não produzem distribuições preditivas nativas.
+
+## Comparando modelos: o perigo da conclusão apressada
+
+Suponha que o modelo $A$ obtenha MAE de 3,12 no conjunto de teste e o modelo $B$ obtenha 3,08. $B$ é melhor? A resposta honesta é: não sabemos, porque ambos os valores são estimativas ruidosas do verdadeiro erro esperado. Se a diferença estiver dentro da variabilidade natural do erro, afirmar superioridade de $B$ é estatisticamente injustificado. A solução vem de testes formais que comparam distribuições de erros, não seus agregados.
+
+O **teste de Diebold-Mariano** [@diebold1995comparing] compara duas séries de erros $\{e^A_t\}$ e $\{e^B_t\}$ sob uma função de perda arbitrária $L$ (tipicamente $L(e) = |e|$ ou $L(e) = e^2$), testando a hipótese nula de igualdade das perdas esperadas. Define-se o diferencial de perda $d_t = L(e^A_t) - L(e^B_t)$ e testa-se $H_0: \mathbb{E}[d_t] = 0$ contra $H_1: \mathbb{E}[d_t] \ne 0$. A estatística de Diebold-Mariano é
+
+$$
+\mathrm{DM} = \frac{\bar{d}}{\sqrt{\widehat{\mathrm{Var}}(\bar{d})}}, \quad \bar{d} = \frac{1}{T}\sum_{t=1}^{T} d_t,
+$$
+
+onde $\widehat{\mathrm{Var}}(\bar{d})$ é um estimador de variância de longo prazo, tipicamente do tipo Newey-West, que corrige para autocorrelação serial em $\{d_t\}$. Sob a nula, $\mathrm{DM} \xrightarrow{d} \mathcal{N}(0,1)$ quando $T \to \infty$; rejeita-se $H_0$ ao nível $\alpha$ se $|\mathrm{DM}| > z_{1-\alpha/2}$. O teste requer erros pareados (mesmo conjunto de teste, mesmas datas) e é mais informativo quanto maior o número de observações de teste.
+
+Quando há mais de dois modelos --- situação típica em comparações entre *baselines* estatísticos, redes neurais e modelos de fundação --- o problema da comparação múltipla emerge. Aplicar Diebold-Mariano par a par entre $k$ modelos gera $\binom{k}{2}$ testes, inflacionando a taxa de falsos positivos. O **Model Confidence Set** (MCS) de @hansen2011model resolve o problema construindo, por teste sequencial de equivalência, um conjunto reduzido de modelos que contém, com probabilidade $1-\alpha$, o melhor modelo. Modelos cujo desempenho é estatisticamente indistinguível do melhor permanecem no conjunto; modelos dominados são eliminados. O MCS é a ferramenta recomendada para comparações em larga escala, como as adotadas nas competições M4 e M5.
+
+## Validação externa e reprodutibilidade
+
+A validade de uma avaliação depende não apenas dos testes estatísticos, mas da arquitetura do experimento. Quatro práticas merecem destaque, todas alinhadas com as recomendações de @petropoulos2022forecasting e @makridakis2020forecasting.
+
+Primeiro, **documentar a partição temporal exata**: datas de início e fim de treino, validação e teste devem ser reportadas sem ambiguidade. Uma partição vagamente descrita como "últimos 20% para teste" é incompleta quando há sazonalidade, ciclos ou quebras estruturais relevantes.
+
+Segundo, **fixar sementes aleatórias** para procedimentos estocásticos (inicialização de redes neurais, *bootstrap* de intervalos de confiança) e reportá-las. A variância entre sementes de uma mesma arquitetura neural pode ser comparável à diferença entre arquiteturas diferentes, um fato que torna médias sobre múltiplas sementes um requisito, não um luxo.
+
+Terceiro, **comparar sempre contra *baselines* honestas**. A naïve sazonal, o ARIMA automático e a suavização exponencial com seleção por critério de informação são *baselines* exigentes --- frequentemente o bastante para derrubar arquiteturas sofisticadas mal ajustadas [@zeng2023transformers]. O Capítulo 3 apresenta essas *baselines* em detalhe; sua presença em qualquer tabela de comparação é um teste de higiene básica.
+
+Quarto, **publicar código e dados**. Resultados de previsão não reproduzíveis têm, para fins de pesquisa, o mesmo valor epistêmico que nenhum resultado. A adoção de repositórios públicos (GitHub, OSF, Zenodo) e de ambientes computacionais versionados (Docker, ambientes Conda exportados, `requirements.txt`) é hoje padrão mínimo.
+
+## Protocolo de avaliação deste livro
+
+Para garantir comparabilidade entre capítulos, adotaremos um protocolo único aplicado aos três *datasets* apresentados no Capítulo 1: o painel macro brasileiro (SGS/BCB e SIDRA/IBGE), o M4 e a Human Mortality Database. O protocolo é o seguinte: particionamento em treino, validação e teste preservando a ordem temporal; janela expansiva para validação cruzada com número de dobras proporcional ao tamanho da série; métricas principais reportadas em MAE, RMSE e MASE; testes de Diebold-Mariano par a par e MCS para comparações multimodelo; cinco sementes aleatórias para todos os métodos estocásticos, com médias e desvios reportados; cinco *baselines* obrigatórias em toda tabela (naïve, naïve sazonal, ETS, ARIMA automático e Theta).
+
+Esse protocolo não é o único defensável, mas é internamente consistente e alinhado com o estado da arte. O leitor que o seguir nos seus próprios projetos terá --- independentemente do resultado obtido --- evitado os erros mais comuns em avaliação de previsões, e poderá sustentar suas conclusões com a confiança que a disciplina exige.
+
+## Leituras recomendadas
+
+@hyndman2006another permanece a leitura obrigatória sobre métricas, propondo o MASE e discutindo as patologias do MAPE com clareza. @armstrong1992error antecipou grande parte das críticas em um artigo ainda hoje relevante. @diebold1995comparing e @hansen2011model fornecem os fundamentos dos testes formais de comparação. @gneiting2007strictly é a referência definitiva sobre regras de pontuação próprias, e @angelopoulos2023conformal apresenta de forma acessível o arcabouço conformal. Para o papel dos *baselines* em disputas recentes envolvendo *Transformers*, @zeng2023transformers é leitura necessária. Por fim, @petropoulos2022forecasting e @makridakis2020forecasting oferecem perspectivas panorâmicas sobre boas práticas em contextos aplicados.

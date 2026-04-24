@@ -1,0 +1,30 @@
+graph TD
+    START["Analise da Serie Temporal"] --> Q1{"Possui sazonalidade?"}
+
+    Q1 -->|Sim| Q2{"Possui tendencia?"}
+    Q1 -->|Nao| Q3{"Possui tendencia?"}
+
+    Q2 -->|Sim| HW["Holt-Winters"]
+    Q2 -->|Nao| SN["Seasonal Naive"]
+
+    Q3 -->|Sim| HOLT["Metodo de Holt"]
+    Q3 -->|Nao| Q4{"Variancia constante?"}
+
+    Q4 -->|Sim| SES["SES"]
+    Q4 -->|Nao| NAIVE["Naive Simples"]
+
+    HW --> COMPARE{"Comparar performance"}
+    SN --> COMPARE
+    HOLT --> COMPARE
+    SES --> COMPARE
+    NAIVE --> COMPARE
+
+    COMPARE --> FINAL["Selecionar baseline com menor erro"]
+
+    style START fill:#e3f2fd
+    style HW fill:#fff3e0
+    style SN fill:#fff3e0
+    style HOLT fill:#fff3e0
+    style SES fill:#fff3e0
+    style NAIVE fill:#fff3e0
+    style FINAL fill:#e8f5e9

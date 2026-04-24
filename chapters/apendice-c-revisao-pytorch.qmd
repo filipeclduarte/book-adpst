@@ -1,0 +1,269 @@
+# Revisão de PyTorch para Séries Temporais {.appendix #sec-apc}
+
+Este apêndice oferece uma revisão pragmática de PyTorch [@paszke2019pytorch] orientada ao público do livro. Não substitui a documentação oficial [@pytorchdocs] nem tutoriais dedicados ao *framework*, mas reúne em um só lugar os elementos que aparecem nos estudos de caso da Parte II: tensores, *autograd*, o módulo `nn`, o loop de treinamento, o *DataLoader*, o uso de GPU, e algumas convenções específicas a séries temporais que são fonte recorrente de erros silenciosos. O leitor que já usa PyTorch em outros domínios pode ir direto à última seção; quem vem de Keras/TensorFlow ou nunca viu o *framework* deve ler na ordem.
+
+::: {.callout-note}
+## Leituras para aprofundamento
+
+A documentação oficial em `pytorch.org/docs` é a referência autoritativa e está sempre atualizada. @goodfellow2016deep fornece o contexto teórico das operações implementadas. Para padrões de código em *forecasting* neural, @benidis2022deep traz um panorama com convenções de bibliotecas especializadas (GluonTS, NeuralForecast, PyTorch Forecasting) que são, no fundo, *wrappers* em torno dos primitivos aqui discutidos. Para o leitor que prefere PyTorch Lightning --- um *framework* que automatiza o *boilerplate* do loop de treino ---, a transição a partir do PyTorch puro apresentado aqui é direta.
+:::
+
+## Tensores: o tipo de dado fundamental
+
+Em PyTorch, tudo é um **tensor**: entradas, saídas, parâmetros, gradientes. Um tensor é um arranjo multidimensional homogeneamente tipado, conceitualmente análogo a um `numpy.ndarray`, mas com duas capacidades adicionais que são a razão de ser do *framework*: pode viver em GPU e rastreia operações para diferenciação automática.
+
+```python
+import torch
+
+# Criação de tensores
+x = torch.tensor([1.0, 2.0, 3.0])              # vetor em CPU, float32
+A = torch.zeros(3, 4)                           # matriz 3x4 de zeros
+B = torch.randn(32, 10, 1)                      # (batch, tempo, features)
+t = torch.arange(0, 100, dtype=torch.float32)   # 0, 1, ..., 99
+
+# Conversão a partir de numpy
+import numpy as np
+arr = np.random.randn(50, 20)
+X = torch.from_numpy(arr).float()               # compartilha memória com arr
+```
+
+Cada tensor carrega três metadados que determinam seu comportamento: `shape` (tupla das dimensões), `dtype` (tipo numérico: `float32`, `float64`, `int64`, etc.) e `device` (`cpu` ou `cuda:0`). O tipo padrão em redes neurais é `float32`, e operações entre tensores exigem `dtype` e `device` compatíveis --- misturar `float32` e `float64` é uma fonte comum de mensagens de erro. Movimentar tensores entre CPU e GPU é explícito:
+
+```python
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+X = X.to(device)      # move para o dispositivo ativo
+y = torch.randn(50, device=device)  # cria diretamente no dispositivo
+```
+
+Operações matriciais fundamentais refletem a notação do @sec-apb: `A @ B` para produto matricial, `A.T` para transposta, `A.sum(dim=0)` para soma ao longo de um eixo, `X.mean(dim=-1, keepdim=True)` para média preservando a dimensão. O PyTorch segue as convenções de *broadcasting* do NumPy, o que permite combinar tensores de *shapes* compatíveis sem *loops* explícitos:
+
+```python
+X = torch.randn(32, 10)          # (batch, features)
+bias = torch.randn(10)           # (features,)
+Y = X + bias                     # broadcasting: bias é reutilizado sobre o batch
+```
+
+## *Autograd*: diferenciação automática
+
+O *autograd* é o que torna PyTorch adequado a *deep learning*. Cada tensor criado com `requires_grad=True` passa a fazer parte de um grafo computacional dinâmico: toda operação aplicada a ele produz novos tensores que registram a operação e os tensores de entrada. A chamada `.backward()` percorre esse grafo em sentido reverso, computando derivadas parciais pela regra da cadeia discutida no @sec-apb.
+
+```python
+w = torch.tensor([2.0, -1.0], requires_grad=True)
+x = torch.tensor([3.0,  4.0])
+y = torch.tensor(5.0)
+
+pred = (w * x).sum()             # 2*3 + (-1)*4 = 2
+loss = (pred - y) ** 2           # (2 - 5)^2 = 9
+loss.backward()
+
+print(w.grad)                    # d loss / d w = 2*(pred - y)*x = [-18, -24]
+```
+
+Três cuidados operacionais são essenciais. Primeiro, **gradientes acumulam**: se `loss.backward()` é chamado duas vezes, os gradientes da segunda chamada são somados aos da primeira. Por isso todo loop de treino começa com `optimizer.zero_grad()`. Segundo, **apenas tensores `float` podem ter gradiente**; gradientes em inteiros não fazem sentido. Terceiro, **operações dentro de um bloco `torch.no_grad()` não constroem o grafo**, o que economiza memória e tempo durante avaliação:
+
+```python
+modelo.eval()
+with torch.no_grad():
+    y_pred = modelo(X_test)
+```
+
+Tensores que não devem propagar gradientes --- por exemplo, um valor alvo em um treino supervisionado, ou estatísticas de normalização calculadas previamente --- podem ser "desligados" do grafo com `.detach()`.
+
+## O módulo `nn`: modelos como classes
+
+Modelos em PyTorch são classes que herdam de `nn.Module`. A convenção é declarar todas as camadas paramétricas no `__init__` e definir a passagem direta (*forward pass*) no método `forward`. O método `__call__` herdado encaminha para `forward` e dispara *hooks* úteis; na prática, chama-se o modelo como uma função: `y = modelo(x)`.
+
+```python
+import torch.nn as nn
+import torch.nn.functional as F
+
+class MLP(nn.Module):
+    def __init__(self, n_entrada, n_oculta, n_saida):
+        super().__init__()
+        self.fc1 = nn.Linear(n_entrada, n_oculta)
+        self.fc2 = nn.Linear(n_oculta, n_saida)
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x):
+        h = F.relu(self.fc1(x))
+        h = self.dropout(h)
+        return self.fc2(h)
+
+modelo = MLP(n_entrada=12, n_oculta=64, n_saida=1)
+print(modelo)                                     # exibe a arquitetura
+print(sum(p.numel() for p in modelo.parameters()))  # número de parâmetros
+```
+
+Todos os parâmetros --- pesos e vieses --- são automaticamente registrados e acessíveis via `modelo.parameters()`. Submódulos declarados como atributos (`self.fc1 = ...`) são registrados recursivamente; camadas armazenadas em listas Python comuns não são, o que é um erro frequente. A solução é usar `nn.ModuleList` ou `nn.Sequential`:
+
+```python
+class MLPProfunda(nn.Module):
+    def __init__(self, dims):
+        super().__init__()
+        self.camadas = nn.ModuleList([
+            nn.Linear(dims[i], dims[i+1]) for i in range(len(dims)-1)
+        ])
+
+    def forward(self, x):
+        for i, camada in enumerate(self.camadas[:-1]):
+            x = F.relu(camada(x))
+        return self.camadas[-1](x)
+```
+
+O módulo `nn` oferece blocos prontos para todas as arquiteturas do livro: `nn.Linear` (camada densa), `nn.Conv1d` (convolução temporal usada no @sec-cap07), `nn.LSTM` e `nn.GRU` (redes recorrentes do @sec-cap06), `nn.TransformerEncoder` (blocos do @sec-cap08), `nn.Embedding` (categóricos, como o *embedding* de população no LCConv). Para ativações e funções sem parâmetros, `torch.nn.functional` oferece versões funcionais (`F.relu`, `F.softmax`, `F.mse_loss`).
+
+## O loop de treinamento canônico
+
+O coração de qualquer projeto PyTorch é o loop de treino. Ele segue um padrão estável de cinco passos por *batch*, que vale a pena memorizar:
+
+```python
+modelo = MLP(12, 64, 1).to(device)
+optimizer = torch.optim.Adam(modelo.parameters(), lr=1e-3)
+criterio = nn.MSELoss()
+
+for epoca in range(n_epocas):
+    modelo.train()                                  # ativa dropout, batchnorm
+    perda_epoca = 0.0
+    for X_batch, y_batch in train_loader:
+        X_batch = X_batch.to(device)
+        y_batch = y_batch.to(device)
+
+        optimizer.zero_grad()                       # 1. zera gradientes
+        y_pred = modelo(X_batch)                    # 2. forward
+        perda = criterio(y_pred, y_batch)           # 3. perda
+        perda.backward()                            # 4. backward
+        optimizer.step()                            # 5. atualização
+
+        perda_epoca += perda.item() * X_batch.size(0)
+
+    # validação ao fim de cada época
+    modelo.eval()
+    with torch.no_grad():
+        y_val_pred = modelo(X_val.to(device))
+        perda_val = criterio(y_val_pred, y_val.to(device)).item()
+    print(f"Época {epoca+1}: treino={perda_epoca/len(train_loader.dataset):.4f} "
+          f"val={perda_val:.4f}")
+```
+
+Três detalhes merecem destaque. **`modelo.train()` e `modelo.eval()`** controlam o comportamento de camadas que se comportam de maneira diferente em treino e inferência --- *dropout* aleatoriza em treino e é identidade em avaliação; *batch normalization* usa estatísticas do *batch* em treino e estatísticas acumuladas em avaliação. Esquecer essa troca é uma fonte clássica de resultados anômalos. **`.item()`** converte um tensor escalar em um `float` Python, liberando a memória do grafo de autograd --- essencial para acumular métricas sem vazamento de memória. **`optimizer.zero_grad()` antes do `backward()`** é necessário porque, como discutido, gradientes acumulam por padrão.
+
+*Early stopping* é tipicamente implementado guardando o melhor estado até então:
+
+```python
+melhor_val = float("inf")
+paciencia = 20
+contador = 0
+melhor_estado = None
+
+for epoca in range(n_epocas):
+    # ... (loop de treino + validação acima)
+    if perda_val < melhor_val:
+        melhor_val = perda_val
+        melhor_estado = {k: v.clone() for k, v in modelo.state_dict().items()}
+        contador = 0
+    else:
+        contador += 1
+        if contador >= paciencia:
+            break
+
+modelo.load_state_dict(melhor_estado)               # restaura o melhor
+```
+
+## *Datasets* e *DataLoaders*
+
+Em projetos de porte moderado, manter todos os tensores em memória e iterar manualmente funciona. Em projetos reais, PyTorch oferece duas abstrações: `Dataset`, que define como acessar um exemplo individual, e `DataLoader`, que cuida de *batching*, embaralhamento e paralelização.
+
+```python
+from torch.utils.data import Dataset, DataLoader
+
+class SerieTemporalDataset(Dataset):
+    def __init__(self, serie, n_lags, horizonte=1):
+        self.serie = torch.as_tensor(serie, dtype=torch.float32)
+        self.n_lags = n_lags
+        self.horizonte = horizonte
+
+    def __len__(self):
+        return len(self.serie) - self.n_lags - self.horizonte + 1
+
+    def __getitem__(self, i):
+        X = self.serie[i : i + self.n_lags]
+        y = self.serie[i + self.n_lags : i + self.n_lags + self.horizonte]
+        return X, y
+
+dataset = SerieTemporalDataset(ipca_values, n_lags=12, horizonte=1)
+loader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=0)
+```
+
+Para séries temporais, **`shuffle=False` no teste e na validação é inegociável** --- preservar a ordem cronológica é o protocolo estabelecido no @sec-cap02. Em treino, embaralhar *batches* é aceitável e geralmente benéfico, *desde que* cada exemplo já tenha sido formado respeitando a flecha do tempo no interior de sua janela (como em `SerieTemporalDataset` acima, em que cada item é uma janela contígua). Embaralhar o treino **não** viola a causalidade quando a partição prévia em treino/validação/teste é cronológica e as janelas são montadas dentro do bloco de treino.
+
+## GPU, precisão e desempenho
+
+A portabilidade CPU/GPU em PyTorch é questão de disciplina com `device`. A regra é: o modelo e todos os tensores de entrada devem estar no mesmo dispositivo antes do *forward*. Para modelos de porte moderado típicos deste livro, uma GPU *mid-range* --- como as oferecidas gratuitamente pelo Google Colab --- é suficiente; treinos de MLP e TCN nos estudos de caso rodam em minutos.
+
+Três técnicas de desempenho vale a pena conhecer. **`torch.compile(modelo)`** (disponível a partir do PyTorch 2.0) compila o grafo computacional e pode oferecer ganhos de 20 a 40% em modelos com muitas operações pequenas. **Precisão mista** (*mixed precision*) executa a maior parte das operações em `float16` mantendo acumuladores críticos em `float32`, reduzindo memória e acelerando treinos em GPUs modernas:
+
+```python
+scaler = torch.cuda.amp.GradScaler()
+for X_batch, y_batch in train_loader:
+    optimizer.zero_grad()
+    with torch.cuda.amp.autocast():
+        y_pred = modelo(X_batch.to(device))
+        perda = criterio(y_pred, y_batch.to(device))
+    scaler.scale(perda).backward()
+    scaler.step(optimizer)
+    scaler.update()
+```
+
+**`num_workers > 0` no `DataLoader`** paraleliza o carregamento de dados em subprocessos, útil quando o pré-processamento é pesado. Para tensores já em memória, o ganho é marginal; para *datasets* que carregam arquivos do disco a cada *batch*, a diferença pode ser dramática.
+
+## Convenções de *shape* em séries temporais
+
+A maior fonte de erros silenciosos ao passar do cálculo matemático para o código PyTorch são as convenções de *shape* --- não há erro de execução quando o *shape* está errado, apenas um modelo que não aprende ou aprende a coisa errada. Vale fixar as três convenções mais relevantes para o livro.
+
+Para **camadas densas** (`nn.Linear`) e MLPs, a entrada tem formato `(B, n)` onde $B$ é o tamanho do *batch* e $n$ o número de *features*. Uma janela de 12 defasagens sobre 32 exemplos é `(32, 12)`. A saída de `nn.Linear(12, 64)` aplicada a esse tensor é `(32, 64)`.
+
+Para **redes recorrentes** (`nn.LSTM`, `nn.GRU`, `nn.RNN`), a entrada padrão é `(T, B, n)` --- tempo primeiro. Com o argumento `batch_first=True`, que o livro usa por legibilidade, o formato passa a ser `(B, T, n)`: *batch*, tempo, *features*. A saída tem formato `(B, T, H)`, em que $H$ é o tamanho do estado oculto; para obter apenas o último passo, usa-se `saida[:, -1, :]`.
+
+Para **convoluções 1D** (`nn.Conv1d`), a convenção é `(B, C, T)`: *batch*, canais, tempo. Canais primeiro, tempo por último. Essa inversão em relação às RNNs é a fonte de erros mais comum na transição entre @sec-cap06 e @sec-cap07, e vale memorizar:
+
+| Arquitetura | Formato esperado | Razão |
+|:---|:---:|:---|
+| MLP (`nn.Linear`) | `(B, n)` | dimensão de *features* no final |
+| RNN (`batch_first=True`) | `(B, T, n)` | tempo como eixo iterado |
+| Conv1D (`nn.Conv1d`) | `(B, C, T)` | canais como eixo dos filtros |
+| Transformer (`batch_first=True`) | `(B, T, d)` | mesma convenção da RNN |
+
+As transposições entre formatos são explícitas. Para passar de `(B, T, n)` (saída de uma LSTM) para `(B, n, T)` (entrada de uma Conv1D), usa-se `x.transpose(1, 2)` ou `x.permute(0, 2, 1)`. Para achatar todo o tempo e todas as *features* em um único vetor antes de uma camada densa final, usa-se `x.reshape(B, -1)` ou `x.flatten(start_dim=1)`. Essas operações são baratas --- frequentemente apenas ajustam metadados sem mover dados na memória --- mas esquecê-las produz erros de dimensão ou, pior, modelos que rodam sem erro mas aprendem algo diferente do pretendido.
+
+## Salvamento, carregamento e reprodutibilidade
+
+Treinos longos devem salvar o estado periodicamente. O padrão recomendado é salvar o `state_dict` do modelo --- um `OrderedDict` de tensores nomeados --- em vez do objeto inteiro:
+
+```python
+torch.save({
+    "epoca": epoca,
+    "modelo": modelo.state_dict(),
+    "optimizer": optimizer.state_dict(),
+    "perda_val": melhor_val,
+}, "checkpoint.pt")
+
+# Recarregar
+ckpt = torch.load("checkpoint.pt", map_location=device)
+modelo.load_state_dict(ckpt["modelo"])
+optimizer.load_state_dict(ckpt["optimizer"])
+```
+
+Para reprodutibilidade --- nunca perfeita em operações de GPU, mas aproximável ---, fixe sementes em todas as fontes de aleatoriedade no início do *script*:
+
+```python
+import random
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+```
+
+Mesmo assim, dois treinos em GPUs diferentes podem produzir resultados ligeiramente distintos devido a ordens não-determinísticas de reduções em CUDA. Para publicações científicas, reporte o desempenho médio e o desvio-padrão sobre múltiplas sementes (tipicamente cinco) em vez de um único número --- prática alinhada à discussão de reprodutibilidade do @sec-cap02.

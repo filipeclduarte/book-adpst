@@ -1,0 +1,37 @@
+# Quarto build outputs
+_book/
+_site/
+
+# Quarto cache
+/.quarto/
+**/*.quarto_ipynb
+_freeze/
+
+# LaTeX intermediários
+*.tex
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# AI assistant metadata
+.claude/
+.openclaude/
+.openclaude-profile.json
+
+# Book-specific
+CLAUDE.md
+WORKFLOW-COLAB.md

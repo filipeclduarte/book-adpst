@@ -1,0 +1,179 @@
+# Setup do Ambiente {.appendix #sec-apa}
+
+Este apêndice explica como configurar o ambiente para acompanhar os códigos do livro. Não é necessário instalar nada no seu computador: todos os notebooks rodam no **Google Colab**, diretamente no navegador.
+
+## O Repositório do Livro
+
+Todo o código está disponível em:
+
+> **[github.com/filipeclduarte/ts-forecasting-book](https://github.com/filipeclduarte/ts-forecasting-book)**
+
+A estrutura de pastas relevante para o leitor é:
+
+```
+ts-forecasting-book/
+├── notebooks/
+│   ├── cap01/          # Notebooks do Capítulo 1
+│   ├── cap02/          # Notebooks do Capítulo 2
+│   ├── ...
+│   └── cap08/
+├── utils/
+│   ├── data.py         # Funções de carregamento dos datasets
+│   ├── metrics.py      # Métricas de avaliação (MAE, RMSE, MASE...)
+│   └── plots.py        # Funções de visualização padronizadas
+└── data/
+    ├── bcb_sgs.csv          # BCB/SGS — séries macroeconômicas e financeiras
+    ├── m4_monthly.csv       # M4 — padrão internacional de competição
+    ├── hmd_ibge.csv         # HMD + IBGE — mortalidade e demografia brasileira
+    └── turismo_mtur.csv     # Ministério do Turismo — chegadas e receitas
+```
+
+Os notebooks da pasta `notebooks/` correspondem diretamente aos capítulos do livro. As funções utilitárias em `utils/` são compartilhadas por todos os capítulos e importadas nos notebooks — você não precisa entender o código delas para acompanhar o livro, mas estão disponíveis para consulta.
+
+## Google Colab
+
+O Google Colab é um ambiente de notebooks Jupyter gratuito hospedado pela Google. Ele oferece acesso a GPUs, não requer instalação e salva os arquivos no seu Google Drive.
+
+**Pré-requisito**: uma conta Google (Gmail).
+
+### Abrindo um notebook do livro no Colab
+
+Cada notebook no repositório pode ser aberto no Colab com um clique no botão que aparece no topo do arquivo no GitHub:
+
+[**▶ Abrir no Google Colab**](https://colab.research.google.com)
+
+Ou acesse diretamente pelo endereço:
+
+```
+https://colab.research.google.com/github/filipeclduarte/ts-forecasting-book/blob/main/notebooks/cap01/notebook.ipynb
+```
+
+Substituindo `cap01/notebook.ipynb` pelo caminho do notebook desejado.
+
+### Interface do Colab
+
+O Colab organiza o trabalho em **células**:
+
+- **Célula de texto** (Markdown): explicações, títulos, equações em LaTeX
+- **Célula de código** (Python): código executável
+
+Para executar uma célula de código, clique nela e pressione `Shift + Enter` (ou o botão ▶ à esquerda da célula). O resultado aparece logo abaixo.
+
+::: {.callout-important}
+## Execute as células em ordem
+
+Os notebooks deste livro dependem de variáveis e objetos definidos em células anteriores. Execute sempre de cima para baixo. Se encontrar um erro de `NameError`, provavelmente pulou uma célula.
+:::
+
+### Conectando ao Google Drive (opcional)
+
+Se quiser salvar modelos treinados ou resultados para uso posterior, monte o Google Drive:
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+```
+
+Uma janela pedirá autorização. Após autorizar, seus arquivos do Drive estarão acessíveis em `/content/drive/MyDrive/`.
+
+## Instalando Dependências
+
+No início de cada notebook há uma célula de instalação. Execute-a uma vez por sessão:
+
+```python
+# Instalação das dependências
+!pip install -q torch statsforecast neuralforecast pandas matplotlib
+```
+
+::: {.callout-note}
+## Por que instalar a cada sessão?
+
+O Colab gratuito não persiste pacotes entre sessões. Ao reconectar (após inatividade ou no dia seguinte), o ambiente é reiniciado e os pacotes precisam ser reinstalados. A célula de instalação resolve isso automaticamente — basta executá-la antes de começar.
+:::
+
+## Verificando o Ambiente
+
+Após instalar as dependências, verifique se tudo está em ordem:
+
+```python
+import torch
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+print(f"PyTorch: {torch.__version__}")
+print(f"Pandas:  {pd.__version__}")
+print(f"NumPy:   {np.__version__}")
+print(f"GPU disponível: {torch.cuda.is_available()}")
+```
+
+A saída esperada (versões podem variar):
+
+```
+PyTorch: 2.x.x+cu121
+Pandas:  2.x.x
+NumPy:   1.x.x
+GPU disponível: True
+```
+
+## Usando GPU no Colab
+
+Os modelos dos capítulos mais avançados (LSTM, TCN, Transformer) treinam significativamente mais rápido com GPU. Para ativar:
+
+1. No menu do Colab: **Ambiente de execução → Alterar o tipo de ambiente de execução**
+2. Selecione **GPU** (T4 é suficiente para todos os experimentos do livro)
+3. Clique em **Salvar**
+
+O runtime será reiniciado — execute novamente a célula de instalação.
+
+## Carregando os Datasets
+
+Os quatro datasets utilizados ao longo do livro estão disponíveis no repositório. A forma mais simples de carregá-los no Colab é diretamente da URL:
+
+```python
+import pandas as pd
+
+BASE = "https://raw.githubusercontent.com/filipeclduarte/ts-forecasting-book/main/data"
+
+# BCB/SGS — séries macroeconômicas e financeiras brasileiras
+bcb = pd.read_csv(f"{BASE}/bcb_sgs.csv", parse_dates=["date"], index_col="date")
+
+# M4 — padrão internacional de competição (mensal)
+m4 = pd.read_csv(f"{BASE}/m4_monthly.csv")
+
+# HMD + IBGE — mortalidade e demografia brasileira
+hmd = pd.read_csv(f"{BASE}/hmd_ibge.csv", parse_dates=["year"])
+
+# Ministério do Turismo — chegadas internacionais e receitas
+mtur = pd.read_csv(f"{BASE}/turismo_mtur.csv", parse_dates=["date"], index_col="date")
+
+print(bcb.shape, m4.shape, hmd.shape, mtur.shape)
+```
+
+::: {.callout-tip}
+## Salvar datasets no Drive para economizar tempo
+
+Se você trabalhar com os notebooks frequentemente, vale salvar os dados no Google Drive para não baixar a cada sessão:
+
+```python
+bcb.to_csv("/content/drive/MyDrive/ts-book/bcb_sgs.csv")
+m4.to_csv("/content/drive/MyDrive/ts-book/m4_monthly.csv")
+hmd.to_csv("/content/drive/MyDrive/ts-book/hmd_ibge.csv")
+mtur.to_csv("/content/drive/MyDrive/ts-book/turismo_mtur.csv")
+```
+:::
+
+## Estrutura de um Notebook do Livro
+
+Cada notebook segue a mesma estrutura, espelhando o capítulo correspondente:
+
+| Seção | Conteúdo |
+|---|---|
+| **0. Setup** | Instalação, imports, seed de reprodutibilidade |
+| **1. Dados** | Carregamento e inspeção dos 4 datasets |
+| **2. Implementação** | Código do método do capítulo, passo a passo |
+| **3. Treinamento** | Loop de treino com logging de métricas |
+| **4. Avaliação** | Comparação com baselines, tabelas e gráficos |
+| **5. Experimentos** | Variações e ablações mencionadas no texto |
+
+A numeração das seções do notebook corresponde às seções do capítulo no livro — se você está lendo a Seção 3.2 do Capítulo 5, o código está na Seção 3.2 do notebook `cap05/`.

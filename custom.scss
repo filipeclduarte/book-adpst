@@ -1,0 +1,29 @@
+/*-- scss:defaults --*/
+
+$font-family-sans-serif: "Source Sans Pro", sans-serif;
+$font-family-monospace: "Fira Code", monospace;
+$headings-font-family: "Source Sans Pro", sans-serif;
+$headings-font-weight: 600;
+$link-color: #2563eb;
+$code-bg: #f8f9fa;
+
+/*-- scss:rules --*/
+
+.quarto-title-block {
+  margin-bottom: 2em;
+}
+
+.callout-note {
+  border-left-color: #2563eb;
+}
+
+/* Better code block styling */
+div.sourceCode {
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+/* Chapter TOC */
+.chapter-toc {
+  font-size: 0.9em;
+}

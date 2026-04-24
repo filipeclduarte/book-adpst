@@ -1,0 +1,293 @@
+# Baselines Estatísticos Clássicos {#sec-cap03}
+
+Imagine que você está prestes a prever a inflação brasileira para os próximos meses. A tentação imediata é recorrer a modelos sofisticados --- redes neurais profundas, *transformers* ou ensembles complexos. Afinal, se essas arquiteturas conquistaram campeonatos de previsão e desafios de *machine learning*, certamente serão superiores aos métodos antigos, não é? Surpreendentemente, a resposta frequentemente é não. Este capítulo apresenta os *baselines* estatísticos: modelos de referência que servem como o padrão mínimo de desempenho que qualquer técnica de Inteligência Artificial deve superar para justificar sua complexidade adicional.
+
+::: {.callout-note}
+## Leituras para aprofundamento
+Este capítulo adota uma abordagem aplicada, didática e concisa, privilegiando intuição e uso prático. Para tratamento teórico aprofundado --- derivações rigorosas, propriedades assintóticas de estimadores, condições de identificação e testes de diagnóstico completos ---, recomenda-se consultar @box2015time, @hamilton1994time, @shumway2017time e @hyndman2021forecasting para o ferramental internacional, e @morettin2018analise, @bueno2011econometria e @enders2014applied para o tratamento em português e em contexto econométrico aplicado.
+:::
+
+## O Princípio da Parcimônia
+
+A *Navalha de Ockham*, princípio filosófico formulado no século XIV por Guilherme de Ockham, orienta que, diante de duas explicações equivalentes, devemos preferir a mais simples [@thorburn1918myth]. Nas ciências aplicadas contemporâneas, essa máxima traduz-se em uma regra prática: não adicione complexidade sem ganho mensurável. Para o cientista social, economista ou atuário, essa orientação assume relevância particular por três razões fundamentais.
+
+Primeiramente, considere a eficiência computacional. Modelos estatísticos clássicos treinam em segundos ou minutos, enquanto Deep Learning podem exigir horas de processamento em GPUs especializadas [@smyl2020hybrid]. Em ambientes de produção onde milhares de séries precisam ser previstas diariamente, essa diferença de escala determina a viabilidade operacional do sistema. Em um ambiente de negócios onde previsões precisam ser atualizadas diariamente — como na gestão de estoques de varejo ou no acompanhamento de indicadores macroeconômicos — essa diferença de tempo não é meramente técnica, mas operacionalmente crítica.
+
+Em segundo lugar, a interpretabilidade frequentemente pesa mais que a precisão marginal. Quando um regulador questiona como uma instituição financeira calculou suas provisões técnicas, ou quando um tribunal avalia uma decisão baseada em previsões algorítmicas, explicar que "a rede neural aprendeu padrões não-lineares complexos" é insuficiente [@goodman2017european; @bratton2021machine]. Regulamentações como o Regulamento Geral de Proteção de Dados (GDPR) da União Europeia consagram o "direito à explicação" das decisões automatizadas. A capacidade de decompor uma previsão em seus componentes — tendência, sazonalidade e erro residual — oferece transparência regulatória e confiança institucional que modelos de caixa-preta não proporcionam.
+
+Por fim, há o problema do sobreajuste (*overfitting*) em pequenas amostras. Séries temporais demográficas, como taxas de mortalidade por idade, ou indicadores macroeconômicos anuais, como o PIB, frequentemente compreendem apenas algumas dezenas de observações. Nesses cenários, modelos com milhões de parâmetros tendem a memorizar o ruído aleatório do passado em vez de capturar padrões generalizáveis, produzindo previsões para o futuro piores que estimativas ingênuas [@makridakis2018statistical; @cerqueira2019arima].
+
+## Modelos Ingênuos: A Simplicidade como Padrão de Referência
+
+Antes de aplicar qualquer técnica sofisticada, devemos estabelecer o mínimo esperado de desempenho. Os modelos ingênuos (*naive models*) oferecem exatamente isso: previsões tão simples que qualquer método elaborado deve superá-las substancialmente para merecer consideração [@hyndman2006another].
+
+### O Ingênuo Simples (Naive)
+
+O modelo mais elementar possível assume que o futuro será exatamente igual ao presente. Formalmente, a previsão para o horizonte $h$ é simplesmente o último valor observado:
+
+$$\hat{y}_{t+h|t} = y_t$$
+
+Embora pareça simplista demais, este modelo é surpreendentemente competitivo em séries que seguem um *passeio aleatório* (*random walk*). Considere o câmbio nominal brasileiro (R$/US$): estudos econométricos clássicos demonstram que as melhores previsões de curto prazo para taxas de câmbio flutuantes são, frequentemente, "amanhã será igual a hoje" [@meese1983empirical; @meese1983out]. A razão é que mudanças cambiais respondem a novas informações econômicas que, por definição, são imprevisíveis — se pudéssemos prevê-las, já estariam incorporadas na taxa atual.
+
+### O Ingênuo Sazonal (Seasonal Naive)
+
+Quando uma série exibe padrões sazonais regulares — como o fluxo de turistas em praias nordestinas, que picam nos meses de dezembro e janeiro — o modelo ingênuo simples falha sistematicamente. O *Seasonal Naive* corrige essa limitação assumindo que a previsão deve igualar o valor observado no mesmo período do ciclo anterior:
+
+$$\hat{y}_{t+h|t} = y_{t+h-m(k+1)}$$
+
+Nesta equação, $m$ representa o período sazonal (por exemplo, 12 para dados mensais com padrão anual) e $k$ é o número de ciclos completos decorridos no horizonte de previsão. Para prever as vendas de dezembro de 2025, usamos as vendas de dezembro de 2024; para janeiro de 2026, usamos janeiro de 2025, e assim por diante.
+
+Este modelo é notavelmente difícil de superar em séries com sazonalidade estável. Imagine os pagamentos de benefícios previdenciários no Brasil: eles seguem um padrão anual previsível relacionado às datas de concessão e revisão, tornando o *Seasonal Naive* um competidor formidável para modelos mais complexos.
+
+A @fig-baseline-selection apresenta um fluxo de decisão para seleção de baselines estatísticos com base nas características da série temporal.
+
+![Fluxo de decisão para seleção de baselines. A partir da análise da série temporal, verifica-se a presença de sazonalidade e tendência para selecionar o método apropriado: Holt-Winters, Seasonal Naive, Método de Holt, SES ou Naive Simples.](../images/mermaid/fig-baseline-selection.png){#fig-baseline-selection width=80%}
+
+## Suavização Exponencial: Equilibrando Memória e Adaptação
+
+Enquanto os modelos ingênuos usam apenas uma observação passada, a família de métodos de Suavização Exponencial (*Exponential Smoothing*) pondera o histórico completo da série, atribuindo pesos decrescentes à medida que os dados se tornam mais remotos. A intuição é que observações recentes geralmente contêm mais informação relevante para o futuro próximo do que dados antigos, mas o passado distante ainda oferece valor contextual.
+
+### Suavização Exponencial Simples (SES)
+
+Para séries sem tendência persistente ou sazonalidade clara — como o índice de confiança do consumidor em períodos de estabilidade macroeconômica — o SES mantém um "nível" atualizado da série através de uma média móvel ponderada:
+
+$$\ell_t = \alpha y_t + (1 - \alpha) \ell_{t-1}$$
+
+O parâmetro $\alpha$ (alfa), compreendido entre 0 e 1, controla a velocidade de adaptação. Um $\alpha$ próximo de 1 faz o modelo reagir rapidamente a novas observações, esquecendo rapidamente o passado — útil em ambientes voláteis. Um $\alpha$ próximo de 0 produz previsões estáveis e suavizadas, apropriadas para séries com ruído de medição significativo.
+
+A escolha do $\alpha$ ótimo é feita tipicamente através de otimização numérica, minimizando o erro de previsão dentro da amostra. Em Python, a implementação do `statsmodels` realiza essa otimização automaticamente.
+
+### Método de Holt-Winters: Capturando Tendência e Sazonalidade
+
+Quando uma série apresenta tanto tendência (crescimento ou declínio sistemático ao longo do tempo) quanto sazonalidade (flutuações periódicas regulares), o método de Holt-Winters oferece uma extensão elegante do SES. Proposto por @holt2004forecasting e posteriormente estendido por Winters para capturar sazonalidade, este método mantém três componentes simultaneamente e continua sendo um dos benchmarks mais difíceis de superar em competições de previsão [@hyndman2008forecasting].
+
+O **nível** ($\ell_t$) representa a baseline da série no tempo $t$, ajustada pela observação atual e pela tendência esperada. A **tendência** ($b_t$) captura a inclinação ou direção da série, atualizada conforme novos dados confirmam ou contradizem a trajetória anterior. A **sazonalidade** ($s_t$) registra o padrão cíclico, que pode ser modelado de forma aditiva (quando a amplitude da sazonalidade é constante) ou multiplicativa (quando a sazonalidade cresce proporcionalmente ao nível da série).
+
+As equações de atualização são:
+
+1.  **Nível:** $\ell_t = \alpha(y_t - s_{t-m}) + (1-\alpha)(\ell_{t-1} + b_{t-1})$
+2.  **Tendência:** $b_t = \beta^*(\ell_t - \ell_{t-1}) + (1-\beta^*)b_{t-1}$
+3.  **Sazonalidade:** $s_t = \gamma(y_t - \ell_{t-1} - b_{t-1}) + (1-\gamma)s_{t-m}$
+
+Os parâmetros $\alpha$, $\beta^*$ e $\gamma$ são, respectivamente, os coeficientes de suavização para nível, tendência e sazonalidade. Quanto mais próximos de 1, mais rápido o modelo adapta-se a mudanças nos respectivos componentes.
+
+A escolha entre sazonalidade aditiva e multiplicativa depende da natureza da série. No comércio varejista, picos sazonais de dezembro representam um aumento absoluto similar em anos de crise ou prosperidade (aditivo). No mercado de ações, volatilidade sazonal tende a escalar com o nível dos preços (multiplicativo).
+
+## Modelos ARIMA: A Estatística Linear Clássica em Ação
+
+Os modelos ARIMA (*AutoRegressive Integrated Moving Average*) constituem o pilar da estatística de séries temporais desde a publicação seminal de @box1976time, que estabeleceu o framework metodológico conhecido como "metodologia de Box-Jenkins" para identificação, estimação e diagnóstico de modelos autorregressivos integrados de médias móveis. A elegância do ARIMA reside em decompor o comportamento de uma série em três componentes fundamentais que capturam diferentes aspectos da dinâmica temporal.
+
+O componente **AR** (*AutoRegressive*, ordem $p$) modela a dependência linear entre uma observação e seus valores defasados (*lags*). Se a inflação de um mês tende a correlacionar-se com a inflação dos três meses anteriores, um termo AR(3) captura essa relação. O componente **I** (*Integrated*, ordem $d$) lida com não-estacionariedade através de diferenciações sucessivas. Uma série não-estacionária — como o PIB nominal brasileiro, que cresce sistematicamente ao longo do tempo — é transformada em estacionária subtraindo-se cada observação da anterior ($y_t - y_{t-1}$), permitindo a aplicação de técnicas que assumem média constante. O componente **MA** (*Moving Average*, ordem $q$) modela o erro de previsão como uma combinação linear de erros passados, capturando choques temporários que persistem por alguns períodos.
+
+A notação $ARIMA(p, d, q)$ identifica as ordens de cada componente. Um $ARIMA(1, 1, 1)$ possui um termo autorregressivo, uma diferenciação e um termo de média móvel.
+
+Quando a sazonalidade está presente, estendemos o modelo para **SARIMA** (*Seasonal ARIMA*), adicionando parâmetros sazonais $(P, D, Q)_m$ que operam no período sazonal $m$. Um $SARIMA(1, 1, 1)(1, 1, 1)_{12}$ é um modelo mensal com estrutura ARIMA tanto na frequência regular quanto na frequência anual.
+
+A identificação dos parâmetros $(p, d, q)$ e $(P, D, Q)$ segue um processo diagnóstico: analisamos a função de autocorrelação (FAC) e a função de autocorrelação parcial (FACP) da série, testamos a estacionariedade com testes formais (ADF, KPSS), e ajustamos modelos candidatos selecionando aquele com menor critério de informação (AIC ou BIC). Esta abordagem diagnóstica, embora mais trabalhosa que métodos automatizados, oferece insights valiosos sobre a estrutura da série.
+
+## Estudo de Caso: Previsão de Taxas de Mortalidade — Suécia (HMD)
+
+Para ilustrar a aplicação prática dos *baselines* estatísticos, utilizaremos dados reais de mortalidade da **Human Mortality Database (HMD)** [@hmd2024] para a Suécia — o país com a série histórica mais longa disponível, iniciando em 1751. A taxa de mortalidade por idade e sexo é uma série crítica para cálculo de anuidades, reservas técnicas, fator previdenciário e projeções populacionais. A mesma metodologia se aplica diretamente às Tábuas Completas de Mortalidade do IBGE (ver @sec-datasets-mortality).
+
+::: {.callout-note}
+## Código completo no notebook
+
+O notebook `cap03-baselines-estatisticos-solucoes.ipynb`, disponível na pasta `notebooks/` do repositório do livro, contém o código completo e executável deste estudo de caso — carregamento dos dados, implementação dos modelos, métricas e gráficos. Nesta seção apresentamos apenas os trechos centrais para ilustrar os conceitos.
+
+**Dados:** arquivo `mortality_sweden.csv` (pasta `notebooks/`). Alternativas: pacote `pyhmfd` ou download manual em [mortality.org](https://www.mortality.org).
+:::
+
+### Carregamento e Preparação dos Dados
+
+Vamos trabalhar com a taxa de mortalidade feminina na idade de 60 anos, período 1950–2020 — totalizando 71 observações anuais, um tamanho de amostra típico de séries demográficas. A coluna `Female` contém $q_x$ (probabilidade anual de morte); multiplicamos por 1 000 para trabalhar em ‰.
+
+```python
+df_raw = pd.read_csv('../notebooks/mortality_sweden.csv')
+
+df = (
+    df_raw[df_raw['Age'].eq(60) & df_raw['Year'].between(1950, 2020)]
+    .groupby('Year')['Female']
+    .mean()
+    .mul(1000)            # q_x → ‰
+    .rename('taxa_mortalidade')
+    .to_frame()
+)
+df.index.name = 'ano'
+```
+
+### Particionamento Temporal
+
+Seguindo o protocolo do @sec-cap02, realizamos o particionamento temporal mantendo a ordem cronológica. Utilizaremos 80% para treino (1950–2005) e 20% para teste (2006–2020), resultando em 15 anos de previsão out-of-sample — um horizonte realisticamente desafiador para planejamento previdenciário.
+
+```python
+train_size = int(len(df) * 0.8)   # 1950–2005
+train = df.iloc[:train_size]
+test  = df.iloc[train_size:]       # 2006–2020
+```
+
+### Implementação dos Baselines
+
+Agora implementamos os modelos ingênuos e de suavização exponencial. Para dados anuais sem sazonalidade intranual, o Seasonal Naive é equivalente ao Naive simples; o Holt-Winters sem componente sazonal reduz-se ao método de Holt com tendência.
+
+```python
+from statsmodels.tsa.api import SimpleExpSmoothing
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.arima.model import ARIMA
+
+# Naive — último valor observado
+naive_pred = np.full(len(test), train['taxa_mortalidade'].iloc[-1])
+
+# SES — suavização exponencial simples
+ses_pred = SimpleExpSmoothing(train['taxa_mortalidade'])\
+    .fit(optimized=True).forecast(len(test))
+
+# Holt — tendência aditiva amortecida (correto para série anual sem sazonalidade)
+holt_pred = ExponentialSmoothing(
+    train['taxa_mortalidade'], trend='add', damped_trend=True
+).fit(optimized=True).forecast(len(test))
+
+# ARIMA(1,1,1) — passeio aleatório com estrutura AR e MA
+arima_pred = ARIMA(train['taxa_mortalidade'], order=(1,1,1))\
+    .fit().forecast(len(test))
+```
+
+### Avaliação das Métricas
+
+Aplicamos as métricas MAE, RMSE e MASE para comparar os modelos, conforme protocolo estabelecido no @sec-cap02. A implementação do MASE escala o erro pelo desempenho do Naive, tornando o resultado interpretável independentemente da unidade da série.
+
+```python
+def mase(y_true, y_pred, y_train):
+    mae_naive = np.mean(np.abs(np.diff(y_train)))   # erro do naive simples
+    mae_model = np.mean(np.abs(y_true - y_pred))
+    return mae_model / mae_naive
+
+previsoes = {'Naive': naive_pred, 'SES': ses_pred,
+             'Holt': holt_pred,   'ARIMA': arima_pred}
+
+for nome, fc in previsoes.items():
+    m = mase(test['taxa_mortalidade'].values, np.asarray(fc),
+             train['taxa_mortalidade'].values)
+    print(f"{nome:<8}  MASE = {m:.3f}")
+```
+
+### Visualização Comparativa
+
+A visualização gráfica é essencial para diagnosticar onde cada modelo acerta ou falha sistematicamente. O código abaixo produz dois painéis: o superior compara as previsões dos quatro modelos contra os valores observados no período de teste 2006–2020, e o inferior mostra os erros de previsão ao longo do tempo.
+
+```python
+import matplotlib.pyplot as plt
+
+anos_teste = test.index
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+
+# Painel superior: previsões vs. observado
+ax1.plot(df.index, df['taxa_mortalidade'], 'k-', label='Observado', linewidth=1.5)
+cores = {'Naive': '#e41a1c', 'SES': '#377eb8', 'Holt': '#4daf4a', 'ARIMA': '#984ea3'}
+for nome, fc in previsoes.items():
+    ax1.plot(anos_teste, np.asarray(fc), '--', color=cores[nome],
+             label=nome, linewidth=1.2)
+ax1.axvline(anos_teste[0], color='gray', linestyle=':', linewidth=1)
+ax1.set_ylabel('Taxa de mortalidade (‰)')
+ax1.legend(ncol=2, fontsize=9)
+
+# Painel inferior: erros de previsão
+for nome, fc in previsoes.items():
+    erros = test['taxa_mortalidade'].values - np.asarray(fc)
+    ax2.plot(anos_teste, erros, '--', color=cores[nome], label=nome, linewidth=1.2)
+ax2.axhline(0, color='black', linewidth=0.8)
+ax2.set_ylabel('Erro de previsão (‰)')
+ax2.set_xlabel('Ano')
+
+plt.tight_layout()
+plt.savefig('../images/fig-baselines-mortalidade.png', dpi=150, bbox_inches='tight')
+plt.show()
+```
+
+### Validação Cruzada Temporal
+
+Para uma avaliação mais robusta que não dependa de uma única partição, aplicamos validação cruzada com janela expansiva, conforme recomendado por @hyndman2021forecasting. A implementação abaixo itera sobre os pontos de corte, ajusta cada modelo e coleta o MASE por dobra.
+
+```python
+import pandas as pd
+
+min_train = 20   # mínimo de observações para treino
+horizon   = 5    # anos à frente avaliados em cada dobra
+step      = 3    # avança 3 anos entre dobras
+
+n = len(df)
+resultados = []
+
+for start in range(min_train, n - horizon, step):
+    tr = df.iloc[:start]['taxa_mortalidade']
+    te = df.iloc[start:start + horizon]['taxa_mortalidade']
+
+    fc_naive = np.full(len(te), tr.iloc[-1])
+    fc_ses   = SimpleExpSmoothing(tr).fit(optimized=True).forecast(len(te))
+    fc_holt  = ExponentialSmoothing(tr, trend='add', damped_trend=True)\
+                   .fit(optimized=True).forecast(len(te))
+    fc_arima = ARIMA(tr, order=(1,1,1)).fit().forecast(len(te))
+
+    for nome, fc in [('Naive', fc_naive), ('SES', fc_ses),
+                     ('Holt', fc_holt), ('ARIMA', fc_arima)]:
+        resultados.append({'modelo': nome, 'dobra': start,
+                           'MASE': mase(te.values, np.asarray(fc), tr.values)})
+
+cv_df = pd.DataFrame(resultados)
+cv_summary = cv_df.groupby('modelo')['MASE'].agg(['mean', 'std'])
+print(cv_summary.round(3))
+```
+
+O parâmetro `step=3` gera uma dobra a cada 3 anos — suficiente para capturar a variabilidade de desempenho em séries demográficas sem custo computacional excessivo.
+
+### Análise de Resíduos
+
+A qualidade de um modelo não se mede apenas pelo erro médio, mas também pela estrutura de seus resíduos. Resíduos bem comportados devem ser aproximadamente normais, não autocorrelacionados e com variância constante. O teste de Ljung-Box verifica formalmente a hipótese de que não há autocorrelação nos resíduos até a defasagem $k$:
+
+```python
+from statsmodels.stats.diagnostic import acorr_ljungbox
+
+residuos = test['taxa_mortalidade'].values - np.asarray(holt_pred)
+lb = acorr_ljungbox(residuos, lags=5, return_df=True)
+
+# p > 0.05: não há autocorrelação — resíduos se comportam como ruído branco
+print(lb[['lb_stat', 'lb_pvalue']])
+```
+
+Um diagnóstico completo inclui ainda histograma dos resíduos, Q-Q plot e gráfico de resíduos versus valores previstos — todos disponíveis no notebook.
+
+### Lições do Estudo de Caso
+
+Este exercício prático com dados de mortalidade brasileira ilustra três lições fundamentais que todo profissional deve internalizar:
+
+**Primeira: o naive é um adversário formidável.** Nas séries de mortalidade da HMD, o modelo ingênuo simples frequentemente apresenta MASE próximo de 1.0, significando que métodos sofisticados precisam oferecer melhorias marginais consistentes para justificar sua complexidade. Não é incomum que Holt ou ARIMA produzam MASE entre 0.8 e 0.9 — uma melhoria de 10-20% que pode ou não justificar o esforço adicional, dependendo do contexto aplicado.
+
+**Segunda: a validação cruzada temporal é essencial.** Uma única partição treino/teste pode ser enganosa por acaso. A janela expansiva fornece uma distribuição de erros que permite quantificar a variabilidade do desempenho e construir intervalos de confiança.
+
+**Terceira: resíduos bem comportados são tão importantes quanto erros baixos.** Um modelo com MAE ligeiramente maior mas resíduos aproximadamente normais e não autocorrelacionados é preferível a um modelo com MAE menor mas resíduos estruturados, pois os intervalos de previsão do primeiro serão mais confiáveis.
+
+O código completo deste estudo de caso, juntamente com o arquivo `mortality_sweden.csv`, está disponível no repositório do livro. O leitor pode replicar a análise com outros países da HMD — inclusive com os dados do Brasil via IBGE (Tábuas Completas de Mortalidade, SIDRA tabela 7362) ou do Sistema de Informações sobre Mortalidade do Ministério da Saúde.
+
+## O Padrão de Ouro para Benchmarking
+
+Ao longo das próximas partes deste livro, adotaremos uma regra de ouro consagrada pelas competições Makridakis (M-competitions): uma arquitetura neural — seja uma LSTM, N-BEATS, Transformer ou modelo híbrido — só será considerada válida se seu erro de previsão for estatística e economicamente inferior ao do *Seasonal Naive* ou de um SARIMA bem calibrado [@makridakis2020m4; @makridakis2022m5].
+
+A justificativa é dupla. Primeiro, se um modelo complexo não consegue superar uma média móvel simples, sua complexidade adicional não está capturando padrões genuínos, mas provavelmente memorizando ruído. Segundo, em muitos domínios aplicados — especialmente em economia, finanças e demografia — os métodos apresentados neste capítulo não são meros *baselines* a serem superados, mas soluções de produção robustas e confiáveis.
+
+Considere o caso da previsão de mortalidade para cálculo atuarial de previdência complementar: estudos comparativos sistemáticos demonstram que, para horizontes de 1 a 5 anos, métodos simples frequentemente igualam ou superam modelos neurais treinados em séries demográficas [@booth2008mortality; @hyndman2021forecasting]. A razão é que padrões de mortalidade são dominados por tendências de longo prazo e sazonalidade demográfica estável que métodos simples capturam eficientemente, enquanto modelos complexos *overfittam* flutuações estocásticas irrelevantes.
+
+Em síntese, antes de embarcar na jornada das Deep Learning apresentadas nas próximas partes, domine os métodos deste capítulo. Eles não são obstáculos a serem ultrapassados, mas fundações a serem construídas. Quando uma rede neural genuinamente supera um SARIMA bem ajustado, essa superioridade é tanto mais significativa quanto mais difícil foi de alcançar.
+
+## Exercícios Propostos
+
+### Exercício 3.1
+Utilizando os dados da Human Mortality Database para a Suécia, disponíveis no arquivo `notebooks/mortality_sweden.csv` do repositório do livro (ou via pacote `pyhmfd`, ou baixados diretamente em [mortality.org](https://www.mortality.org)), carregue as taxas de mortalidade femininas para a idade de 60 anos, período 1950–2020. Implemente os modelos Naive, Seasonal Naive e Holt-Winters. Calcule o MASE para cada modelo em previsões de 1 a 5 anos à frente. Qual modelo apresenta melhor desempenho? Por quê?
+
+### Exercício 3.2
+Baixe a série do IPCA brasileiro do SIDRA/IBGE (tabela 1737) de 2000 a 2023. Implemente uma função de validação cruzada temporal com janela expansiva para comparar três modelos: Naive, SES (Suavização Exponencial Simples) e ARIMA automático. Reporte MAE, RMSE e MASE médios sobre as dobras. Visualize as distribuições dos erros.
+
+### Exercício 3.3
+Ajuste um modelo Holt-Winters aos dados de taxa de câmbio BRL/USD (dados do BCB, série 1) para o período 2019-2023. Experimente ambas as variantes: sazonalidade aditiva e multiplicativa. Use validação cruzada com janela deslizante de 60 dias para determinar qual variante produz menores erros de previsão em horizontes de 1, 5 e 10 dias.
+
+### Exercício 3.4
+Implemente uma função em Python que execute o algoritmo completo de seleção de ordem SARIMA: (1) teste de estacionariedade ADF, (2) identificação visual de FAC/FACP, (3) ajuste de múltiplos candidatos, (4) seleção por AIC/BIC, (5) diagnóstico de resíduos com teste de Ljung-Box. Aplique sua função a uma série de mortalidade do IBGE e reporte o modelo selecionado.

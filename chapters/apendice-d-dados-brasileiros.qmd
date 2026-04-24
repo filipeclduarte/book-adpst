@@ -1,0 +1,225 @@
+# Dados Brasileiros — Fontes e APIs {.appendix #sec-apd}
+
+## Por que este apêndice existe
+
+A literatura internacional de previsão de séries temporais é dominada por *benchmarks* que, embora valiosos para comparabilidade entre métodos, são ruidosos como veículo didático para o público brasileiro de ciências sociais aplicadas. Datasets como ETT (temperatura de transformadores elétricos), *electricity* e *traffic* são séries de engenharia; M4 e M5, embora incluam dados econômicos, apresentam-se agregados e anonimizados, sem vinculação a um país ou instituição específica. O resultado é que o leitor aprende a modelar, mas não aprende a lidar com os problemas reais do seu contexto --- séries reportadas com defasagem de publicação, revisões metodológicas retroativas, mudanças de classificação, *breaks* estruturais induzidos por crises e reformas, descontinuidades de códigos, APIs que mudam de endpoint sem aviso.
+
+Este apêndice existe para fechar essa lacuna. Documenta as fontes brasileiras mais relevantes para o público do livro --- economistas, atuários, demógrafos, pesquisadores de política pública ---, os pacotes Python que mediam o acesso, as armadilhas operacionais recorrentes, e as convenções metodológicas que vale a pena conhecer antes de se aventurar por essas APIs. O objetivo não é exaustivo: há muito mais fontes de dados brasileiras do que cabe em um apêndice. O objetivo é que, ao sair daqui, o leitor saiba quais são as principais, como acessá-las programaticamente, e que tipo de tratamento cada uma exige.
+
+Vale registrar uma segunda motivação, menos óbvia mas igualmente importante. Ao trabalhar com dados brasileiros reais, o leitor absorve implicitamente uma geografia institucional --- quem é o BCB, o IBGE, a SUSEP, a PREVIC, o INEP --- e uma cronologia de eventos estruturais --- Plano Real em 1994, adoção do regime de metas de inflação em 1999, reforma previdenciária de 2019, pandemia em 2020, mudanças metodológicas da PNAD em 2012. Essa alfabetização institucional é parte do ofício do cientista social aplicado brasileiro e não deve ser terceirizada para a linha de comando; este apêndice deliberadamente mistura trechos de código com contexto histórico para cultivá-la.
+
+::: {.callout-note}
+## Leituras para aprofundamento
+
+O guia metodológico padrão para indicadores do IBGE é a própria documentação publicada em `ibge.gov.br/estatisticas`, organizada por pesquisa (PNAD Contínua, POF, Censo). Para o Banco Central, o SGS (Sistema Gerenciador de Séries Temporais) em `www3.bcb.gov.br/sgspub` é a porta de entrada, com metadados completos para cada série. Três pacotes Python consolidam o acesso programático: `python-bcb` (séries do SGS e operações estruturadas de mercado), `sidrapy` (tabelas do SIDRA/IBGE) e `basedosdados` (um repositório federado com dados brasileiros tratados, mantido pela ONG Base dos Dados). Para leitura sistemática, @morettin2018analise e @bueno2011econometria apresentam as principais séries brasileiras e suas propriedades; o relatório metodológico da PNAD Contínua [@ibge_pnadc] é essencial para quem trabalha com mercado de trabalho.
+:::
+
+## SGS/BCB: séries econômicas e financeiras
+
+O **Sistema Gerenciador de Séries Temporais** (SGS) do Banco Central é a principal fonte de séries econômicas e financeiras brasileiras. Organiza mais de 20 mil séries --- câmbio, juros, agregados monetários, balança de pagamentos, inadimplência, expectativas de mercado, operações de crédito --- cada uma identificada por um código numérico estável. O acesso programático se dá pelo pacote `python-bcb`, que converte chamadas REST à API pública do SGS em `DataFrames` pandas.
+
+```python
+from bcb import sgs
+import pandas as pd
+
+# Painel macro brasileiro básico
+codigos = {
+    "ipca":        433,    # IPCA, variação mensal (%)
+    "pib":         22109,  # PIB real, índice encadeado
+    "selic_meta":  432,    # Meta Selic definida pelo Copom (% a.a.)
+    "cambio":      1,      # Dólar comercial, venda (R$/US$, diário)
+    "desocupacao": 24369,  # Taxa de desocupação PNAD-C (%)
+}
+
+painel = sgs.get(codigos, start="2000-01-01")
+painel.head()
+```
+
+Três armadilhas operacionais merecem atenção. Primeiro, **frequências mistas**: o PIB é trimestral, o IPCA e a desocupação são mensais, o câmbio é diário, a Selic-meta é definida em reuniões a cada 45 dias. Combinar séries exige alinhamento explícito --- `resample` para baixa frequência com agregação adequada (média, último valor, soma) ou *forward-fill* cuidadoso, nunca interpolação cega, que inventa informação. Segundo, **defasagem de publicação**: o IPCA de um mês só é divulgado em torno do dia 10 do mês seguinte; o PIB de um trimestre sai dois meses após o encerramento. Um modelo que usa o IPCA de janeiro como variável exógena para prever o câmbio de janeiro viola a cronologia real; o @sec-cap02 detalha essa categoria de *data leakage*. Terceiro, **revisões retroativas**: o PIB sofre revisões anuais quando o IBGE atualiza sua metodologia ou os deflatores; uma observação "histórica" pode mudar entre duas consultas, um fenômeno conhecido como *data vintage*. Para aplicações críticas, vale baixar e arquivar o *snapshot* usado em cada experimento.
+
+O **Focus** é outra série importante do BCB, contendo as expectativas de mercado coletadas semanalmente junto a instituições financeiras. É acessível via o subpacote `bcb.Expectativas` e fornece, para cada data de referência, a mediana, a média e o desvio-padrão das projeções para IPCA, PIB, Selic e câmbio em diferentes horizontes --- um *benchmark* natural contra o qual comparar os modelos do livro.
+
+## SIDRA/IBGE: agregados e microdados
+
+O **SIDRA** é o portal agregador do IBGE, expondo tabelas pré-computadas a partir das diversas pesquisas do instituto. Cada tabela é identificada por um número --- 1737 para o IPCA, 6381 para a PNAD Contínua, 7362 para as Tábuas Completas de Mortalidade ---, com eixos para variáveis, períodos, unidades territoriais e cortes demográficos. O acesso em Python se dá pelo pacote `sidrapy`:
+
+```python
+import sidrapy
+
+# IPCA por grupo de produtos (12 grupos)
+ipca_grupos = sidrapy.get_table(
+    table_code="1419",
+    territorial_level="1",      # Brasil
+    ibge_territorial_code="all",
+    period="last 12",            # últimos 12 meses
+    variable="63",               # variação mensal (%)
+    classification="315/all",    # todos os grupos
+)
+```
+
+A API aceita chaves compostas e retorna um *DataFrame* "longo" que quase sempre exige pivotagem para ficar utilizável em modelos. Dois padrões de uso são recorrentes. Para séries temporais puras, pede-se uma variável específica ao longo do tempo, e o resultado é pivotado com `period` nas linhas. Para cortes demográficos (idade × sexo × região), o foco desloca-se para uma data fixa e a pivotagem é cruzada entre eixos categóricos --- útil, por exemplo, ao analisar a estrutura etária da força de trabalho ou a matriz de mortalidade do IBGE.
+
+Uma característica do SIDRA que o leitor precisa conhecer é a **estratificação da disponibilidade temporal**. Nem toda série existe para toda a história: a PNAD Contínua começa em 2012; a POF é quinquenal e de cobertura desigual entre edições; os Censos Demográficos são decenais (1970, 1980, 1991, 2000, 2010, 2022). Séries estruturalmente curtas demandam cautela particular ao aplicar métodos que exigem amostras longas --- *Transformers* e redes profundas vão sobreajustar rapidamente. O @sec-cap02 discute as implicações dessa limitação para o protocolo de avaliação.
+
+## IBGE: pesquisas estruturantes
+
+Além do SIDRA, o IBGE disponibiliza **microdados** de suas principais pesquisas --- acesso individual, linha a linha, a cada observação coletada, anonimizada. Para o público deste livro, três pesquisas merecem menção. A **PNAD Contínua** é a pesquisa domiciliar trimestral de mercado de trabalho, com coleta desde 2012; fornece taxa de desocupação, rendimento, horas trabalhadas, informalidade e características do posto de trabalho. A **POF** (Pesquisa de Orçamentos Familiares) coleta estrutura de despesas e rendimentos das famílias a cada cinco ou seis anos, e é a base metodológica para os pesos do IPCA. O **Censo Demográfico** e as **Tábuas Completas de Mortalidade** (SIDRA 7362) formam o insumo primário para cálculos atuariais de longo prazo, e são centrais nos estudos de caso de mortalidade do @sec-cap04 e do @sec-cap07.
+
+O pacote `basedosdados` oferece um atalho útil para muitas dessas pesquisas, consolidando arquivos de microdados em um *data warehouse* BigQuery com esquema tipado. Para quem não quer lidar com os *dictionary files* do IBGE e as conversões de formato, é o caminho mais curto; para quem precisa da versão oficial bit-a-bit, o acesso direto aos arquivos originais do IBGE permanece o padrão ouro.
+
+## Mortalidade: IBGE e HMD
+
+A mortalidade brasileira por idade é coberta de duas formas complementares. As **Tábuas Completas de Mortalidade** do IBGE (SIDRA 7362) fornecem probabilidades de morte por idade ($q_x$), sobreviventes ($\ell_x$), óbitos ($d_x$) e expectativa de vida ($e_x$) por sexo e idade, publicadas anualmente desde 1998, com reconstrução metodológica retroativa até 1940. A **Human Mortality Database** (HMD) é o repositório internacional de referência, cobrindo mais de 40 países com séries que frequentemente remontam ao século XIX, mas o Brasil **não** faz parte do acervo principal da HMD --- fato frequentemente mal compreendido em trabalhos nacionais.
+
+A reconciliação entre as duas fontes passa pela equivalência clássica $m_x \approx q_x / (1 - 0{,}5\, q_x)$ entre a taxa central de mortalidade $m_x$ (unidade da HMD) e a probabilidade de morte $q_x$ (unidade do IBGE). Essa aproximação é fiel em idades jovens e adultas mas degrada em idades muito avançadas, onde $q_x$ se aproxima de 1; nesses casos, métodos como Kannisto ou Horiuchi-Coale são preferíveis, e o @sec-cap04 discute as opções atuariais padrão. Operacionalmente, a biblioteca `pyhmfd` (`pip install pyhmfd`) automatiza o *download* e parsing da HMD e do IBGE SIDRA, eliminando a necessidade de manipulação manual dos arquivos RAW.
+
+```python
+# Tábuas Completas IBGE (SIDRA 7362)
+tabua = sidrapy.get_table(
+    table_code="7362",
+    territorial_level="1",
+    ibge_territorial_code="all",
+    period="last",                # última tábua disponível
+    variable="all",
+    classification="2/all,287/all",  # sexo × idade
+)
+```
+
+## SUSEP e PREVIC: dados do setor de seguros e previdência
+
+Para o público atuarial, duas autarquias federais publicam dados estruturados. A **SUSEP** (Superintendência de Seguros Privados) divulga estatísticas trimestrais de prêmios, sinistros, reservas técnicas e resultados das seguradoras, em painel por ramo de operação (automóvel, vida, saúde suplementar, previdência aberta, capitalização). O **SES-SUSEP** é o sistema eletrônico que expõe essas informações, com arquivos CSV e XLS acessíveis via *download* manual ou *scraping* --- não há API REST oficial estável, o que exige *wrappers* caseiros. A **PREVIC** (Superintendência Nacional de Previdência Complementar) publica dados das entidades fechadas de previdência complementar (EFPC): ativos, benefícios, participantes, cobertura, em base trimestral. Ambas as fontes são críticas para estudos sobre o mercado segurador e previdenciário brasileiro, mas a experiência operacional de carregá-las é bem menos suave que a do SGS ou do SIDRA, e vale orçar tempo adicional em projetos que dependam delas.
+
+## IPEADATA: séries macroeconômicas e sociais do IPEA
+
+O **IPEADATA** é o repositório de dados do Instituto de Pesquisa Econômica Aplicada (IPEA), com mais de 5 mil séries macroeconômicas, regionais e sociais do Brasil. Muitas delas derivam de fontes primárias como BCB e IBGE, mas com tratamento editorial adicional — padronização de períodos, conversão de unidades, reconstruções históricas que estendem séries para antes do início oficial das APIs originais. Para o público deste livro, dois usos típicos são: acessar versões longas de indicadores econômicos (PIB, renda, pobreza, desigualdade desde os anos 1940–1960) e cruzar séries de política social com indicadores demográficos de forma pré-alinhada.
+
+O acesso programático em Python usa o pacote `ipeadatapy`:
+
+```python
+import ipeadatapy as ip
+import pandas as pd
+
+# Listar todas as séries disponíveis (retorna DataFrame com ~5 mil linhas)
+catalogo = ip.list_series()
+catalogo.columns.tolist()
+# ['CODE', 'NAME', 'COMMENT', 'UNIT', 'FREQUENCY', 'SOURCE',
+#  'SOURCE_ABBREVIATION', 'COUNTRY', 'NUMERICALTYPE', 'THEMECODE']
+```
+
+O fluxo padrão começa com uma busca por palavra-chave e termina com o download da série por código:
+
+```python
+# Buscar séries relacionadas a desigualdade de renda
+resultados = ip.search("gini")
+print(resultados[["CODE", "NAME", "FREQUENCY", "SOURCE"]].to_string())
+
+# Carregar o índice de Gini da renda domiciliar per capita (PNAD)
+# Código: PNADC12_GINI12
+gini = ip.timeseries("PNADC12_GINI12")
+gini.tail()
+```
+
+```python
+# Carregar múltiplas séries em paralelo e montar painel
+codigos_ipea = {
+    "pib_pc_real":   "GAC12_PIBPMV12",   # PIB per capita real (R$ 2010)
+    "gini":          "PNADC12_GINI12",   # Índice de Gini (PNAD-C)
+    "pobreza_ext":   "PNADC12_POBEXT12", # Taxa de extrema pobreza (%)
+}
+
+painel_ipea = pd.concat(
+    {nome: ip.timeseries(cod).set_index("DATE")["VALUE"]
+     for nome, cod in codigos_ipea.items()},
+    axis=1,
+)
+painel_ipea.index = pd.to_datetime(painel_ipea.index)
+painel_ipea.tail()
+```
+
+Três particularidades do IPEADATA merecem atenção. Primeiro, **os códigos não têm um padrão intuitivo** — derivam da nomenclatura interna do IPEA e mudam entre versões da API; vale sempre confirmar via `ip.metadata(codigo)` antes de usar uma série em produção. Segundo, **a cobertura territorial varia**: algumas séries existem apenas para o Brasil agregado; outras chegam ao nível estadual ou municipal, mas com frequência e continuidade menores. Terceiro, **nem toda série está atualizada com a mesma regularidade** — séries de baixa frequência (anuais ou quinquenais) podem estar defasadas em relação às publicações originais. `ip.metadata(codigo)` devolve a data da última atualização e a fonte primária, o que é o primeiro checklist antes de incluir a série em qualquer análise.
+
+```python
+# Inspecionar metadados de uma série antes de usar
+meta = ip.metadata("PNADC12_GINI12")
+print(meta[["NAME", "UNIT", "FREQUENCY", "SOURCE", "LASTUPDATE"]].T)
+```
+
+## DATASUS: dados de saúde e mortalidade
+
+O **DATASUS** é o departamento de informática do SUS (Sistema Único de Saúde) e disponibiliza microdados de praticamente todo o sistema de saúde público brasileiro. Para o público deste livro, quatro sistemas são especialmente relevantes: o **SIM** (Sistema de Informações sobre Mortalidade), que registra todos os óbitos com Declaração de Óbito (DO) desde 1979; o **SINASC** (Sistema de Informações sobre Nascidos Vivos), com todos os nascimentos desde 1994; o **SIH** (Sistema de Informações Hospitalares), com internações do SUS; e o **SIA** (Sistema de Informações Ambulatoriais). O SIM em particular é insumo direto para construção de tábuas de mortalidade a partir de registros vitais — o mesmo princípio metodológico que justifica a HMD para países europeus.
+
+O acesso programático usa o pacote `pysus`, que abstrai o protocolo FTP do DATASUS e entrega os arquivos `.dbc` (formato proprietário do Ministério da Saúde) como DataFrames pandas:
+
+```python
+from pysus.online_data import SIM
+import pandas as pd
+
+# Listar arquivos disponíveis no SIM para um estado e ano
+# O SIM organiza os arquivos por UF e ano de ocorrência do óbito
+arquivos = SIM.get_files(group="DO", uf="SP", year=2019)
+print(arquivos)
+```
+
+```python
+# Baixar e converter o arquivo de óbitos de São Paulo em 2019
+df_obitos = SIM.load(arquivos[0])
+
+# Colunas principais:
+# DTOBITO  -- data do óbito (DDMMAAAA)
+# CAUSABAS -- CID-10 da causa básica de morte
+# SEXO     -- 1=masculino, 2=feminino, 9=ignorado
+# IDADE    -- código composto (ver dicionário do SIM)
+# CODMUNRES -- código IBGE do município de residência
+df_obitos[["DTOBITO", "CAUSABAS", "SEXO", "IDADE", "CODMUNRES"]].head()
+```
+
+A variável `IDADE` do SIM usa um código composto: o primeiro dígito indica a unidade (1=minutos, 2=horas, 3=dias, 4=meses, 5=anos) e os dois dígitos seguintes o valor. Para séries temporais de mortalidade adulta, filtra-se `IDADE >= 500` e extrai-se a idade em anos subtraindo 500:
+
+```python
+# Decodificar idade e filtrar óbitos adultos (≥ 1 ano)
+df_obitos["idade_anos"] = df_obitos["IDADE"].apply(
+    lambda x: int(str(x)[1:]) if str(x)[0] == "5" else None
+)
+adultos = df_obitos.dropna(subset=["idade_anos"])
+
+# Agregar óbitos por idade e sexo -- insumo para calcular m_x
+obitos_por_idade = (
+    adultos.groupby(["idade_anos", "SEXO"])
+    .size()
+    .reset_index(name="obitos")
+)
+obitos_por_idade.head(10)
+```
+
+Para construir taxas de mortalidade ($m_x = D_x / E_x$) a partir do SIM, o numerador $D_x$ vem do SIM e o denominador $E_x$ (população exposta ao risco) vem das Projeções da População do IBGE ou dos Censos, que fornecem a população por idade e sexo em 1º de julho de cada ano — convenção padrão em demografia. Essa combinação produz séries comparáveis às da HMD e é o caminho metodologicamente correto para construir um painel de mortalidade brasileiro anterior a 1998 (início das Tábuas Completas do IBGE).
+
+```python
+# Baixar múltiplos estados e anos em loop
+estados = ["SP", "RJ", "MG", "BA", "RS"]
+anos   = list(range(2010, 2020))
+
+frames = []
+for uf in estados:
+    for ano in anos:
+        arqs = SIM.get_files(group="DO", uf=uf, year=ano)
+        if arqs:
+            df = SIM.load(arqs[0])
+            df["UF"] = uf
+            df["ANO"] = ano
+            frames.append(df)
+
+obitos_painel = pd.concat(frames, ignore_index=True)
+obitos_painel.shape  # (linhas, colunas)
+```
+
+Dois avisos operacionais importantes. Primeiro, o DATASUS distribui os arquivos em formato `.dbc`, uma versão comprimida do dBASE III proprietária do Ministério da Saúde; o `pysus` cuida da conversão internamente, mas depende da biblioteca `blast` instalada no ambiente — em Colab, `!pip install pysus` resolve. Segundo, **a qualidade do preenchimento das variáveis varia por estado e período**: a cobertura do registro de óbitos no Norte e Nordeste melhorou substancialmente entre 1980 e 2010 mas ainda é inferior à do Sul e Sudeste; qualquer análise regional deve documentar explicitamente a qualidade do denominador usado.
+
+## Outras fontes relevantes
+
+Para projetos que cruzam as séries unificadoras do livro com contextos específicos, vale registrar fontes adicionais úteis. O **Tesouro Nacional**, por meio do portal *Tesouro Transparente* e do banco de dados **Tesouro Direto**, publica séries diárias de preços e taxas dos títulos públicos federais, insumo para modelagem de curva de juros. O **INEP** publica indicadores educacionais a partir do Censo Escolar, do Enem e do Saeb. O **Ministério do Trabalho**, por meio da **RAIS** e do **CAGED**, expõe o vínculo formal entre trabalhadores e empresas, com periodicidade anual e mensal respectivamente. Cada uma dessas fontes tem suas próprias idiossincrasias de formato e disponibilidade; o tempo investido em dominá-las paga-se quando o projeto exige essa especificidade.
+
+## Boas práticas operacionais
+
+Três hábitos operacionais facilitam a vida de quem trabalha com dados brasileiros e vale formalizá-los. Primeiro, **arquive os *snapshots***: salve localmente, com carimbo de data e versão da fonte, os dados brutos baixados de cada API. Revisões retroativas e mudanças de endpoint transformam experimentos reprodutíveis em irreplicáveis de um mês para o outro; o *snapshot* arquivado é seu seguro contra essa entropia. Segundo, **padronize o fluxo de leitura**: mantenha um módulo Python com funções `carregar_ipca()`, `carregar_pib()`, `carregar_tabua_ibge()` que encapsulem os detalhes de cada API --- parâmetros, pivotagem, tratamento de missing, conversão de tipos. Esse módulo passa a ser parte do seu ativo de conhecimento e evolui com o tempo. Terceiro, **documente a defasagem real de cada série**: uma nota simples no topo do módulo indicando que "o IPCA só é publicado no dia 10 do mês seguinte" vale mais que muita otimização sofisticada corrigindo depois um vazamento temporal que nunca deveria ter ocorrido.
+
+A alfabetização em dados brasileiros é, em última análise, uma forma de alfabetização institucional. Quanto mais o leitor entender como cada órgão opera, quais pesquisas cada um conduz, com que periodicidade divulga e que tipo de revisão retroativa pratica, mais sólido será o terreno sobre o qual seus modelos se constroem. Este apêndice é um ponto de partida; o domínio real se adquire com a prática.

@@ -1,0 +1,38 @@
+graph TB
+    subgraph Conv_Padrao["Convolucao Padrao"]
+        direction TB
+        CP0["Input: x1 x2 x3 x4 x5 x6"]
+        CP1["y1 = w0*x0 + w1*x1 + w2*x2"]
+        CP2["usa x2 (futuro!)"]
+        CP3["y2 = w0*x1 + w1*x2 + w2*x3"]
+        CP4["usa x3 (futuro!)"]
+        
+        CP0 --> CP1
+        CP1 --> CP2
+        CP0 --> CP3
+        CP3 --> CP4
+    end
+    
+    subgraph Conv_Causal["Convolucao Causal"]
+        direction TB
+        CC0["Input: 0 0 x1 x2 x3 x4 x5 x6"]
+        CC1["y1 = w0*0 + w1*0 + w2*x1"]
+        CC2["so passado"]
+        CC3["y2 = w0*0 + w1*x1 + w2*x2"]
+        CC4["so passado"]
+        CC5["y3 = w0*x1 + w1*x2 + w2*x3"]
+        CC6["so passado"]
+        
+        CC0 --> CC1
+        CC1 --> CC2
+        CC0 --> CC3
+        CC3 --> CC4
+        CC0 --> CC5
+        CC5 --> CC6
+    end
+    
+    style CP2 fill:#ffcdd2
+    style CP4 fill:#ffcdd2
+    style CC2 fill:#c8e6c9
+    style CC4 fill:#c8e6c9
+    style CC6 fill:#c8e6c9

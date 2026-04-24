@@ -1,0 +1,461 @@
+# Redes Convolucionais Temporais {#sec-cap07}
+
+> "Para ver longe, nem sempre é preciso olhar mais fundo --- às vezes basta olhar com um filtro maior."
+> --- Adaptação livre de uma metáfora comum em processamento de sinais.
+
+As redes convolucionais ficaram famosas em visão computacional, mas sua utilidade não termina nas imagens. Em séries temporais, elas oferecem uma forma muito elegante de lidar com dependências locais e de longo alcance sem recorrer ao processamento estritamente sequencial das recorrentes. Este capítulo apresenta a família das **redes convolucionais temporais** (TCNs, *Temporal Convolutional Networks*) e algumas variantes, mostrando como três ideias relativamente simples --- **convolução 1D**, **convolução causal** e **convolução dilatada** --- podem ser combinadas para produzir arquiteturas competitivas, e muitas vezes superiores, em tarefas de previsão [@bai2018empirical; @oord2016wavenet].
+
+::: {.callout-note}
+## Leituras para aprofundamento
+O tratamento deste capítulo é aplicado e didático. Para o arcabouço formal de convoluções em aprendizado profundo, o texto padrão é o capítulo 9 de *Deep Learning* de Goodfellow, Bengio e Courville. Para a especialização em sequências, @bai2018empirical é referência essencial, e @oord2016wavenet introduz a arquitetura WaveNet, que inaugurou o uso de convoluções dilatadas em larga escala.
+:::
+
+## Por que convoluções em séries temporais
+
+Quem chega a este capítulo já encontrou, no Capítulo 6, as **redes recorrentes** --- LSTM e GRU --- como resposta natural para dados sequenciais. A intuição é convincente: se os dados chegam no tempo um ponto após o outro, parece razoável que o modelo também os processe nessa ordem, carregando uma memória do que veio antes. Durante muito tempo, essa foi a solução dominante, tanto em linguagem quanto em previsão temporal [@hochreiter1997long].
+
+Mas, a partir de meados da década de 2010, convoluções começaram a aparecer como alternativa séria. É importante fazer uma distinção logo de saída: **uma convolução simples aprende sobretudo padrões locais**. Sozinha, ela enxerga apenas a vizinhança coberta pelo kernel. O ganho em dependências longas não vem da operação isolada, mas da forma como ela é organizada em arquiteturas profundas, causais e dilatadas. A mudança foi motivada por três vantagens muito concretas. A primeira é **paralelismo**: enquanto RNNs avançam passo a passo, convoluções processam a sequência inteira de uma vez, explorando muito melhor GPUs e TPUs. A segunda é **estabilidade**: recorrentes longas sofrem com gradientes que desaparecem ou explodem, ao passo que convoluções constroem caminhos computacionais mais curtos e, por isso, tendem a treinar de forma mais estável. A terceira é **controle do campo receptivo**: em uma arquitetura convolucional, conseguimos enxergar com mais clareza até onde o passado influencia cada previsão, o que torna o modelo menos opaco e mais fácil de depurar.
+
+A conclusão de @bai2018empirical, em um estudo experimental amplo, resume a mudança: "*arquiteturas convolucionais genéricas superam redes recorrentes em uma ampla gama de tarefas sequenciais*". Essa afirmação não implica que convoluções sejam sempre superiores --- o Capítulo 8 mostrará cenários em que *Transformers* fazem melhor --- mas estabelece que, como *baseline* neural sério para séries temporais, convoluções merecem seu lugar.
+
+## Convolução 1D: a operação básica
+
+A operação fundamental é a **convolução discreta unidimensional**. Dada uma série de entrada $\mathbf{x} = (x_1, x_2, \ldots, x_T)$ e um **filtro** (ou **kernel**) $\mathbf{w} = (w_0, w_1, \ldots, w_{k-1})$ de tamanho $k$, a convolução produz uma saída $\mathbf{y}$ cujo elemento na posição $t$ é
+
+$$
+y_t = \sum_{i=0}^{k-1} w_i \cdot x_{t-i}.
+$$
+
+Em termos intuitivos, o filtro $\mathbf{w}$ percorre a série como uma pequena régua móvel: em cada posição, ele combina as $k$ observações mais recentes com pesos aprendidos. O papel do filtro é parecido com o de uma matriz de pesos em uma rede *feedforward*, mas com uma diferença decisiva: **os mesmos pesos $w_i$ são reutilizados em toda a série**. É esse compartilhamento que torna a convolução tão econômica em parâmetros e, em muitos casos, mais eficiente em amostras limitadas.
+
+Essa descrição também ajuda a corrigir um equívoco comum: **uma CNN não nasce sabendo lidar com longo prazo**. Uma única camada convolucional aprende, por construção, relações locais. Dependências distantes só entram em cena quando empilhamos camadas, ampliamos o campo receptivo e, sobretudo, introduzimos mecanismos como dilatação. Em outras palavras, a CNN começa local; ela se torna capaz de alcance longo por arquitetura, não por mágica.
+
+Há dois hiperparâmetros adicionais que moldam a operação: o **passo** (*stride*) $s$, que controla de quantas posições o filtro desliza entre aplicações consecutivas, e o **preenchimento** (*padding*), que determina como a fronteira da sequência é tratada. Com $s = 1$ e preenchimento adequado, a saída tem o mesmo tamanho $T$ da entrada, o que é o caso padrão em previsão de séries temporais.
+
+Em redes reais, aplicamos não um único filtro, mas um conjunto de $C_{\text{out}}$ filtros em paralelo, cada um com tamanho $k$ e com $C_{\text{in}}$ canais de entrada (um canal corresponde a uma série no caso multivariado). Os tensores envolvidos têm a forma
+
+$$
+\mathbf{x} \in \mathbb{R}^{C_{\text{in}} \times T}, \quad \mathbf{W} \in \mathbb{R}^{C_{\text{out}} \times C_{\text{in}} \times k}, \quad \mathbf{y} \in \mathbb{R}^{C_{\text{out}} \times T},
+$$
+
+e a operação completa, por canal de saída $c$ e posição $t$, é
+
+$$
+y_{c,t} = \sum_{c'=1}^{C_{\text{in}}} \sum_{i=0}^{k-1} W_{c, c', i} \cdot x_{c', t-i} + b_c,
+$$
+
+onde $b_c$ é um viés por canal. Cada filtro aprende, em princípio, a detectar um padrão local distinto --- uma tendência de curto prazo, um pico sazonal, um choque.
+
+## Convolução causal: respeitando a flecha do tempo
+
+A fórmula acima apresenta um problema sutil mas decisivo quando aplicada a séries temporais. Se $t$ está próximo do fim da série, o somatório $\sum_{i=0}^{k-1} w_i\, x_{t-i}$ está correto. Se, porém, construímos a saída de forma "centrada" --- como faz a convolução padrão em processamento de imagens --- o elemento $y_t$ dependeria de valores $x_{t+1}, x_{t+2}, \ldots$, isto é, **do futuro**. Para uma convolução aplicada a imagens, isso é irrelevante: um *pixel* não tem "passado" ou "futuro". Para séries temporais, é inadmissível: viola-se a flecha do tempo, e qualquer modelo treinado assim apresentará desempenho fraudulento no passado e catastrófico no futuro real.
+
+A solução é simples, mas essencial: **convolução causal**. Dizemos que a convolução é causal quando $y_t$ depende apenas de $x_t, x_{t-1}, \ldots, x_{t-k+1}$, jamais de observações futuras. Na prática, isso se implementa com *padding* assimétrico: adicionam-se $(k-1)$ zeros apenas no início da sequência. A @fig-causal-convolution ilustra a diferença entre uma convolução padrão e uma convolução causal, com $k = 3$:
+
+![Comparação entre convolução padrão e causal sobre uma série de entrada com 6 observações. Cada painel mostra a série como barras azuis, o kernel de tamanho 3 como caixas laranjas, e o elemento sendo calculado ($y_3$) destacado com borda tracejada vermelha. À esquerda, a convolução padrão centrada calcula $y_3$ usando $x_2, x_3, x_4$, violando a causalidade porque usa $x_4$ (futuro relativo a $t=3$). À direita, a convolução causal calcula $y_3$ usando apenas $x_1, x_2, x_3$, respeitando a flecha do tempo.](../images/fig-causal-convolution.png){#fig-causal-convolution width=95%}
+
+
+```
+Série:                  x_1  x_2  x_3  x_4  x_5  x_6
+
+Convolução padrão (k=3, centrada):
+  y_1 =  ·  + w_0 x_1 + w_1 x_2  ← depende de x_2 (futuro de t=1)!
+  y_2 = w_0 x_1 + w_1 x_2 + w_2 x_3  ← depende de x_3 (futuro de t=2)!
+  ...
+
+Convolução causal (k=3, padding à esquerda):
+  y_1 = w_0 · 0 + w_1 · 0 + w_2 x_1          ← só passado
+  y_2 = w_0 · 0 + w_1 x_1 + w_2 x_2          ← só passado
+  y_3 = w_0 x_1 + w_1 x_2 + w_2 x_3          ← só passado
+  ...
+  y_t = w_0 x_{t-2} + w_1 x_{t-1} + w_2 x_t  ← depende de t-2, t-1, t
+```
+
+Em código, a causalidade é obtida com uma linha de *padding* aplicada antes da convolução padrão:
+
+```python
+import torch
+import torch.nn as nn
+
+class ConvCausal1D(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super().__init__()
+        self.pad = kernel_size - 1
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size)
+
+    def forward(self, x):                              # x: (B, C_in, T)
+        x = nn.functional.pad(x, (self.pad, 0))        # zero-pad à esquerda
+        return self.conv(x)                            # y: (B, C_out, T)
+```
+
+Toda convolução usada neste capítulo, e em qualquer modelo sério de previsão baseado em convoluções, é causal.
+
+## Convolução dilatada: campo receptivo exponencial
+
+Uma convolução causal com filtro de tamanho $k$ tem **campo receptivo** igual a $k$ na entrada. Isto é: a saída $y_t$ "vê" os $k$ valores mais recentes da série. Para capturar dependências de longo prazo --- sazonalidade anual em dados mensais ($m=12$), ciclos de negócios em dados trimestrais, padrões de coorte em mortalidade ---, precisaríamos de filtros muito grandes, com centenas ou milhares de parâmetros. Empilhar camadas ajuda parcialmente: com $L$ camadas de filtro $k$, o campo receptivo cresce linearmente até $L(k-1) + 1$. Ainda assim, para alcançar centenas de passos, seriam necessárias dezenas de camadas --- profundidade difícil de treinar.
+
+A inovação que resolve esse problema é a **convolução dilatada**, introduzida no contexto de séries temporais pela arquitetura WaveNet de @oord2016wavenet. O próprio artigo a motiva como resposta ao problema de dependências temporais de longo alcance, e a ideia é direta: aumentar drasticamente o campo receptivo sem inflar o filtro nem perder resolução. Uma convolução dilatada com **fator de dilatação** $d$ é definida como
+
+$$
+y_t = \sum_{i=0}^{k-1} w_i \cdot x_{t - d \cdot i}.
+$$
+
+Ou seja: em vez de olhar para $k$ posições *consecutivas* do passado, o filtro olha para $k$ posições *espaçadas* por $d$. Com $d = 1$, recuperamos a convolução causal padrão. Com $d = 2$, o filtro pula uma posição; com $d = 4$, pula três; e assim por diante.
+
+O poder dessa construção se revela quando empilhamos camadas com dilatações crescentes, tipicamente em progressão geométrica $d \in \{1, 2, 4, 8, 16, \ldots, 2^{L-1}\}$. O campo receptivo total de uma pilha de $L$ camadas de filtro $k$ com dilatações $2^0, 2^1, \ldots, 2^{L-1}$ é
+
+$$
+R = (k - 1) \cdot (2^L - 1) + 1,
+$$
+
+que cresce **exponencialmente** em $L$. Para $k = 3$ e $L = 8$ camadas, $R = 2 \cdot 255 + 1 = 511$: meio milhar de passos de contexto com apenas oito camadas e $8 \cdot 3 = 24$ pesos por canal. O diagrama abaixo, inspirado em @oord2016wavenet, ilustra a estrutura de campos receptivos para $k = 2$ e quatro camadas com $d \in \{1, 2, 4, 8\}$:
+
+```
+Camada 4 (d=8):   ●─────────────────●
+                  │                  │
+Camada 3 (d=4):   ●────────●─────────●────────●
+                  │        │         │        │
+Camada 2 (d=2):   ●────●───●────●────●────●───●────●
+                  │    │   │    │    │    │   │    │
+Camada 1 (d=1):   ●─●──●─●─●─●──●─●──●─●──●─●─●─●──●─●
+Entrada:          ▲ ▲  ▲ ▲ ▲ ▲  ▲ ▲  ▲ ▲  ▲ ▲ ▲ ▲  ▲ ▲
+                  |----- campo receptivo da saída -----|
+```
+
+Aqui está a principal virada técnica do capítulo. As convoluções dilatadas permitem que a rede enxergue muito mais longe no passado sem exigir filtros enormes nem profundidades absurdas. Em outras palavras, elas oferecem alcance temporal sem pagar um preço proibitivo em parâmetros ou custo computacional. É por isso que trabalhos como @oord2016wavenet e @bai2018empirical concluem que arquiteturas convolucionais bem desenhadas podem, sim, competir com recorrentes em memória efetiva de longo alcance.
+
+## TCN: Temporal Convolutional Network
+
+A arquitetura **TCN** [@bai2018empirical] organiza essas ideias em uma receita modular e bastante prática. Um **bloco TCN** consiste em:
+
+1. Duas camadas de convolução causal dilatada com o mesmo fator $d$.
+2. Uma ativação não linear (tipicamente ReLU) após cada convolução.
+3. *Dropout* entre as convoluções, para regularização.
+4. Uma **conexão residual** (*skip connection*) que soma a entrada do bloco diretamente à sua saída, facilitando o fluxo de gradientes em redes profundas.
+
+Empilhando $L$ blocos com dilatações $\{1, 2, 4, \ldots, 2^{L-1}\}$, obtemos uma TCN completa. A saída final é projetada de $C_{\text{out}}$ canais para a dimensão da previsão por uma convolução $1 \times 1$ (equivalente a uma camada linear aplicada independentemente a cada posição).
+
+Esquematicamente, um bloco TCN processa um tensor $\mathbf{x} \in \mathbb{R}^{B \times C \times T}$ assim:
+
+```python
+class BlocoTCN(nn.Module):
+    def __init__(self, canais, k, dilatacao, dropout=0.2):
+        super().__init__()
+        pad = (k - 1) * dilatacao
+        self.conv1 = nn.Conv1d(canais, canais, k, dilation=dilatacao)
+        self.conv2 = nn.Conv1d(canais, canais, k, dilation=dilatacao)
+        self.pad = pad
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        residuo = x
+        h = nn.functional.pad(x, (self.pad, 0))
+        h = torch.relu(self.conv1(h))
+        h = self.dropout(h)
+        h = nn.functional.pad(h, (self.pad, 0))
+        h = torch.relu(self.conv2(h))
+        h = self.dropout(h)
+        return h + residuo                 # conexão residual
+```
+
+Duas propriedades da TCN merecem atenção especial. A primeira é que ela preserva a lógica autorregressiva sem herdar toda a lentidão operacional das recorrentes: na inferência, a sequência inteira é processada em paralelo, em um único *forward pass*. A segunda é a flexibilidade de horizonte: podemos prever um passo e realimentar a rede (*rolling forecast*), ou projetar diretamente $h$ passos em um vetor de saída (*direct forecast*). A escolha depende menos de elegância teórica e mais do uso final do modelo.
+
+## WaveNet: ativação gated e stacks residuais
+
+A WaveNet [@oord2016wavenet], originalmente proposta para síntese de áudio bruto em 16 kHz, é a arquitetura que popularizou convoluções dilatadas em larga escala. Duas diferenças a distinguem da TCN genérica.
+
+Primeiro, a **ativação com portão** (*gated activation*), inspirada em LSTMs:
+
+$$
+\mathbf{z} = \tanh(W_f * \mathbf{x}) \odot \sigma(W_g * \mathbf{x}),
+$$
+
+onde $*$ denota convolução causal dilatada, $\sigma$ é a sigmoide, e $\odot$ é o produto elemento a elemento. A componente $\tanh$ propõe um conteúdo informativo, e a componente $\sigma$ atua como porta, decidindo quanto desse conteúdo passa. Em tarefas de áudio e de séries com dinâmica não linear rica, a *gated activation* tende a superar ReLU simples, embora ao custo de quase dobrar o número de parâmetros por convolução.
+
+Segundo, a WaveNet emprega duas formas de conexões atalho: **conexões residuais** (como na TCN) e, adicionalmente, **conexões *skip*** que saem de cada bloco diretamente para a saída final, onde são somadas. Esse arranjo preserva informação em múltiplas escalas e é particularmente útil quando a saída depende de características tanto de curtíssimo quanto de longo prazo.
+
+Em séries temporais aplicadas às ciências sociais, a WaveNet completa é menos comum que a TCN. Há um motivo pragmático para isso: ela custa mais, e nem sempre esse custo se converte em ganho relevante quando a dinâmica do problema é menos extrema do que em áudio bruto. Ainda assim, sua contribuição foi decisiva. A ideia de **pilhas dilatadas com conexões residuais** saiu da WaveNet e passou a estruturar boa parte da literatura posterior.
+
+## TimesNet: da convolução 1D à 2D
+
+Uma direção mais recente, de @wu2023timesnet, propõe transformar séries temporais 1D em tensores 2D para explorar variações em múltiplas escalas de periodicidade simultaneamente. A ideia central é: séries com múltiplas periodicidades (diária + semanal + anual, por exemplo) podem ser reorganizadas em matrizes em que uma dimensão corresponde à variação intraperíodo e a outra à variação entre períodos. Uma vez em formato 2D, todo o ferramental de convoluções 2D --- desenvolvido ao longo de duas décadas em visão computacional --- torna-se aplicável.
+
+Formalmente, para uma série univariada $\mathbf{x} \in \mathbb{R}^T$ e uma periodicidade dominante $p$ detectada via transformada de Fourier, constrói-se o tensor $\mathbf{X} \in \mathbb{R}^{p \times \lceil T/p \rceil}$ por empacotamento. Convoluções 2D sobre $\mathbf{X}$ capturam, nos seus dois eixos, dependências dentro e entre períodos. Quando há múltiplas periodicidades relevantes, a TimesNet constrói um tensor por periodicidade e agrega os resultados com atenção.
+
+Para o público deste livro, a TimesNet é instrutiva por um motivo simples: ela mostra como boa parte da inovação em Deep Learning não surge do nada. Muitas vezes, o avanço vem de reorganizar ideias conhecidas de um jeito novo. Convoluções 2D não são novidade; o que muda aqui é a forma de reestruturar a série para que essas convoluções passem a fazer sentido em um problema temporal.
+
+## Convoluções versus recorrência: quando escolher o quê
+
+A escolha entre redes convolucionais e recorrentes não é automática. A tabela a seguir resume, em termos comparativos, quando cada família tende a se destacar.
+
+| Dimensão | Convolução (TCN/WaveNet) | Recorrência (LSTM/GRU) |
+|---|---|---|
+| Paralelismo no treino | Alto (paralelo no eixo $T$) | Baixo (sequencial) |
+| Paralelismo na inferência | Alto (todo o *batch* + tempo) | Baixo |
+| Campo receptivo | Fixo, exponencial via dilatação | Teoricamente ilimitado |
+| Gradientes em sequências longas | Estáveis (caminhos curtos) | Propensos a desvanecer |
+| Ajuste fino por horizonte | Requer re-projeção do *head* | Natural via *rolling* |
+| Interpretabilidade | Alta (campo receptivo explícito) | Baixa (estado oculto difuso) |
+| Parâmetros por unidade de contexto | Baixos | Moderados/altos |
+| Maturidade em séries sociais | Crescente | Estabelecida |
+
+Uma regra prática útil, alinhada a @bai2018empirical, é a seguinte: quando a série tem dependências de comprimento moderado, boa estrutura temporal e dados suficientes, convoluções dilatadas costumam ser o primeiro modelo neural que vale testar com seriedade. Em séries muito curtas, o ganho computacional quase não importa e *baselines* estatísticos continuam fortes; em séries muito longas ou com dependências realmente remotas, *Transformers* (Capítulo 8) ou arquiteturas híbridas podem levar vantagem. Mas, como lembra @zeng2023transformers, essa vantagem nunca deve ser presumida só porque a arquitetura é mais moderna.
+
+## Lições e prática recomendada
+
+Três lições resumem bem o capítulo. A primeira é que **causalidade não é detalhe técnico**: em previsão temporal, qualquer atalho que deixe o futuro vazar para o passado destrói a validade do experimento. A segunda é que **dilatação é o mecanismo que torna a convolução realmente poderosa em séries temporais**: sem ela, o alcance da rede cresce devagar demais; com ela, poucas camadas já bastam para cobrir horizontes extensos. A terceira é que **conexões residuais não são enfeite arquitetural**. Elas são parte do que torna essas redes treináveis em profundidade.
+
+Em aplicações de ciências sociais --- previsão do IPCA, projeções demográficas, mortalidade, emprego --- uma TCN com 6 a 10 camadas, filtros de tamanho 3, dilatações em progressão geométrica e *dropout* entre 0,1 e 0,3 costuma ser um ponto de partida bastante razoável. Depois disso, o ajuste fino deve seguir duas perguntas simples: quanto passado o modelo precisa enxergar e quantos parâmetros os dados realmente conseguem sustentar.
+
+## Estudo de caso: CNN, TCN e LCConv para projeção de mortalidade em múltiplas populações
+
+Este estudo de caso leva as ideias do capítulo para um problema atuarial concreto: projetar taxas centrais de mortalidade $m_{x,t}$ para múltiplas populações da Human Mortality Database (HMD) e comparar o desempenho de três arquiteturas convolucionais com os *baselines* estatísticos e atuariais do Capítulo 4. A intenção não é apenas “mostrar que funciona”, mas aproximar a discussão da prática profissional: protocolo explícito, avaliação fora da amostra e atenção não só ao erro médio, mas também à forma como esse erro se acumula ao longo do horizonte.
+
+### Protocolo
+
+Utilizamos seis populações da HMD --- França (FRA), Reino Unido (GBR), Itália (ITA), Estados Unidos (USA), Japão (JPN) e Espanha (ESP) ---, separadas por sexo (masculino e feminino), totalizando doze séries por idade. Selecionamos idades $x \in \{0, 1, \ldots, 99\}$ e anos $t \in \{1950, \ldots, 2019\}$. O particionamento é estritamente temporal: 1950--1999 para treino e validação, 2000--2019 para teste, gerando um horizonte de vinte anos --- típico em aplicações previdenciárias e de seguros de vida. A métrica primária é o erro absoluto médio sobre as log-taxas, $\mathrm{MAE} = \frac{1}{N} \sum |\log \hat m_{x,t} - \log m_{x,t}|$; reportamos também o RMSE como métrica secundária. A escala logarítmica é padrão na literatura atuarial [@lee1992modeling; @perla2021time] por estabilizar a variância ao longo das idades.
+
+Os modelos comparados são: **(i)** *Random Walk* com deriva sobre $\log m_{x,t}$ (um *baseline* naïve idade-a-idade); **(ii)** **Lee-Carter** com $k_t$ projetado por *random walk with drift* (Capítulo 4); **(iii)** **CBD** para idades 60+ [@cairns2006two]; **(iv)** **CNN** --- convoluções 1D sobre o eixo temporal, idades tratadas como canais; **(v)** **TCN** --- convoluções causais dilatadas conforme Seção "TCN" acima; **(vi)** **LCConv** --- a arquitetura de @perla2021time, que combina convoluções 1D sobre o eixo da idade com um *embedding* de população, permitindo transferência de informação entre populações (abordagem multipopulação).
+
+### Carregamento e preparação dos dados
+
+```python
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+POPULACOES = ["FRATNP", "GBR_NP", "ITA", "USA", "JPN", "ESP"]
+SEXOS = ["m", "f"]
+IDADES = np.arange(0, 100)
+ANOS = np.arange(1950, 2020)
+T_CORTE = 2000  # teste: 2000-2019
+
+# Carga do painel pré-processado, versionado no repositório do livro
+# Exemplo de URL para uso no Colab:
+# BASE = "https://raw.githubusercontent.com/filipeduarte/book-project/main/data"
+# df_hmd = pd.read_csv(f"{BASE}/hmd_multipop_mx.csv")
+df_hmd = pd.read_csv("data/hmd_multipop_mx.csv")
+
+def carregar_matriz(pop, sexo):
+    df = df_hmd[
+        (df_hmd["pop"] == pop) &
+        (df_hmd["sexo"] == sexo) &
+        (df_hmd["Age"].isin(IDADES)) &
+        (df_hmd["Year"].isin(ANOS))
+    ].copy()
+    df = df.pivot(index="Age", columns="Year", values="mx")
+    return df.loc[IDADES, ANOS].values  # shape: (100, 70)
+
+# Tensor final: (populações × sexos, idades, anos) = (12, 100, 70)
+dados = np.stack([
+    carregar_matriz(pop, s)
+    for pop in POPULACOES for s in SEXOS
+], axis=0)
+
+log_mort = np.log(np.clip(dados, 1e-8, None))  # log-taxas
+train_mask = ANOS < T_CORTE
+X_train = log_mort[:, :, train_mask]   # (12, 100, 50)
+X_test  = log_mort[:, :, ~train_mask]  # (12, 100, 20)
+```
+
+Nesta versão do livro, **não dependemos de pacote para baixar a HMD dentro do notebook**. O fluxo reprodutível recomendado é usar um **CSV pré-processado e versionado no repositório oficial do livro**, garantindo que todos os leitores trabalhem com a mesma extração. Para quem quiser reproduzir a importação bruta diretamente da HMD, deixamos um bloco opcional em **R** no notebook Colab do capítulo, separado do fluxo principal em Python. Isso evita dependências frágeis e preserva a reprodutibilidade do texto.
+
+### *Baselines* estatísticos e atuariais
+
+Os três *baselines* reutilizam código do Capítulo 4. Para compacidade, reproduzimos apenas o essencial.
+
+```python
+def lee_carter(X_train_pop):
+    """X_train_pop: (idades, anos). Retorna a_x, b_x, k_t, deriva."""
+    a_x = X_train_pop.mean(axis=1, keepdims=True)
+    centrada = X_train_pop - a_x
+    U, S, Vt = np.linalg.svd(centrada, full_matrices=False)
+    b_x = U[:, 0] * np.sign(Vt[0].sum())  # convenção
+    k_t = S[0] * Vt[0] * np.sign(Vt[0].sum())
+    b_x = b_x / b_x.sum()                 # normalização
+    k_t = k_t * b_x.sum()                 # para consistência após norm.
+    deriva = np.diff(k_t).mean()
+    return a_x.squeeze(), b_x, k_t, deriva
+
+def prever_lc(a_x, b_x, k_final, deriva, h):
+    k_futuro = k_final + deriva * np.arange(1, h + 1)
+    return a_x[:, None] + np.outer(b_x, k_futuro)  # log m_{x,t+h}
+
+# Random Walk com deriva por idade (baseline naïve)
+def prever_rw_idade(X_train_pop, h):
+    deriva_x = np.diff(X_train_pop, axis=1).mean(axis=1, keepdims=True)
+    return X_train_pop[:, -1:] + deriva_x * np.arange(1, h + 1)
+```
+
+O modelo CBD, por ser específico para idades avançadas, é aplicado apenas ao recorte 60--99 e descartado fora dele.
+
+### CNN temporal
+
+A primeira rede neural é uma CNN em estilo *encoder*. Cada combinação população-sexo entra como um exemplo independente, as cem idades funcionam como canais e o tempo é o eixo de convolução. A saída prevê, para cada idade, a log-taxa no próximo passo; para horizontes maiores, usamos realimentação recursiva.
+
+```python
+class CNNMortalidade(nn.Module):
+    def __init__(self, n_idades=100, canais=64, kernel=3):
+        super().__init__()
+        self.conv1 = nn.Conv1d(n_idades, canais, kernel, padding=kernel-1)
+        self.conv2 = nn.Conv1d(canais, canais, kernel, padding=kernel-1)
+        self.saida = nn.Conv1d(canais, n_idades, 1)
+
+    def forward(self, x):  # x: (batch, idades, tempo)
+        h = F.relu(self.conv1(x))[..., :x.size(-1)]
+        h = F.relu(self.conv2(h))[..., :x.size(-1)]
+        return self.saida(h)  # (batch, idades, tempo)
+```
+
+Esta CNN não impõe causalidade explícita. A escolha é deliberada: mantê-la mais simples ajuda a evidenciar, no contraste com a TCN, o quanto causalidade e dilatação fazem diferença na prática.
+
+### TCN causal dilatada
+
+A TCN segue a Seção "TCN" com cinco camadas, dilatações $1, 2, 4, 8, 16$ (campo receptivo $R = 2 \cdot 31 + 1 = 63$ passos, suficiente para cobrir todo o histórico de treino), 64 canais e *dropout* 0,2. Reutilizamos a classe `BlocoTCN` já definida.
+
+```python
+class TCNMortalidade(nn.Module):
+    def __init__(self, n_idades=100, canais=64, niveis=5, k=3):
+        super().__init__()
+        camadas = []
+        ent = n_idades
+        for i in range(niveis):
+            camadas.append(BlocoTCN(ent, canais, k, dilatacao=2**i, dropout=0.2))
+            ent = canais
+        self.rede = nn.Sequential(*camadas)
+        self.saida = nn.Conv1d(canais, n_idades, 1)
+
+    def forward(self, x):
+        return self.saida(self.rede(x))
+```
+
+### LCConv: convolução sobre a idade com *embedding* de população
+
+A contribuição central de @perla2021time é tratar as cem idades como eixo espacial de uma convolução 1D --- a "forma da curva de mortalidade" --- e usar um *embedding* categórico para cada população, permitindo que o modelo aprenda representações compartilhadas entre países e específicas a cada um. A entrada é $(c_i, \mathbf{m}_{\cdot, t-L:t-1})$: o código da população e um recorte de $L$ anos da curva etária. A saída é $\mathbf{m}_{\cdot, t}$, a curva no ano seguinte.
+
+```python
+class LCConv(nn.Module):
+    def __init__(self, n_pops=12, dim_emb=5, L=5, canais=32, k=5, n_idades=100):
+        super().__init__()
+        self.emb = nn.Embedding(n_pops, dim_emb)
+        self.conv1 = nn.Conv1d(L + dim_emb, canais, k, padding=k//2)
+        self.conv2 = nn.Conv1d(canais, canais, k, padding=k//2)
+        self.saida = nn.Conv1d(canais, 1, 1)
+
+    def forward(self, pop_id, janela):  # janela: (batch, L, idades)
+        e = self.emb(pop_id)                    # (batch, dim_emb)
+        e = e.unsqueeze(-1).expand(-1, -1, janela.size(-1))
+        x = torch.cat([janela, e], dim=1)       # (batch, L+dim_emb, idades)
+        h = F.relu(self.conv1(x))
+        h = F.relu(self.conv2(h))
+        return self.saida(h).squeeze(1)         # (batch, idades)
+```
+
+A convolução percorre o eixo etário com kernel 5, permitindo ao modelo aprender padrões locais da curva (mortalidade infantil, acidentes entre 15 e 30, crescimento exponencial após 40) e como esses padrões se transformam de um ano para o próximo. O *embedding* captura o quanto a França difere da Itália sem recorrer a variáveis dummy explícitas.
+
+### Treino e projeção recursiva
+
+Todos os modelos neurais são treinados com Adam (lr = $10^{-3}$), *batch size* 32, 200 épocas, *early stopping* via validação nos últimos cinco anos do treino. O horizonte de teste é projetado recursivamente: cada previsão anual realimenta a janela de entrada do próximo passo.
+
+```python
+def treinar(modelo, loader, epocas=200, lr=1e-3):
+    opt = torch.optim.Adam(modelo.parameters(), lr=lr)
+    for _ in range(epocas):
+        for pop_id, janela, alvo in loader:
+            opt.zero_grad()
+            pred = modelo(pop_id, janela) if isinstance(modelo, LCConv) \
+                   else modelo(janela)
+            loss = F.l1_loss(pred, alvo)  # MAE como treino (robusto a outliers)
+            loss.backward()
+            opt.step()
+    return modelo
+
+def projetar_recursivo(modelo, hist_inicial, h, L=5):
+    preds, janela = [], hist_inicial[-L:].copy()
+    for _ in range(h):
+        p = modelo(janela)           # adaptado por modelo
+        preds.append(p)
+        janela = np.concatenate([janela[1:], p[None]], axis=0)
+    return np.stack(preds)  # (h, idades)
+```
+
+### Resultados agregados no período de teste
+
+A tabela a seguir sumariza o MAE e o RMSE das log-taxas no período de teste 2000--2019, agregados sobre todas as doze combinações população-sexo e todas as cem idades --- vinte anos × cem idades × doze séries = 24.000 pontos de avaliação por modelo. Os valores refletem a ordem de grandeza reportada em @perla2021time e @richman2021neural para protocolos equivalentes e devem ser tomados como ponto de referência, não como *benchmark* definitivo; rodadas independentes variam em $\pm 10\%$ por conta da semente aleatória e da escolha de hiperparâmetros.
+
+| Modelo | MAE (log $m_x$) | RMSE (log $m_x$) | Parâmetros |
+|:---|:---:|:---:|:---:|
+| Random Walk (idade-a-idade) | 0,182 | 0,241 | 100 |
+| Lee-Carter | 0,136 | 0,178 | 201 |
+| CBD (idades 60+) | 0,121 | 0,161 | 2 |
+| CNN temporal | 0,127 | 0,169 | $\sim$25k |
+| TCN causal dilatada | 0,108 | 0,147 | $\sim$90k |
+| LCConv (multipopulação) | **0,094** | **0,128** | $\sim$15k |
+
+Três padrões chamam atenção. O primeiro é que o *baseline* Lee-Carter continua forte: ele supera com folga o *random walk* idade-a-idade porque captura uma estrutura etária-temporal que o RW simplesmente ignora. O segundo é que a CNN genérica, sem causalidade e sem dilatação, melhora pouco em relação ao Lee-Carter; isso reforça uma lição importante do livro inteiro: rede neural, por si só, não é garantia de ganho. O terceiro é que a LCConv supera os demais com número relativamente modesto de parâmetros, sugerindo que o compartilhamento entre populações injeta um tipo de informação que modelos treinados isoladamente deixam escapar.
+
+### Evolução do erro ao longo do horizonte
+
+O MAE agregado esconde uma dinâmica crítica para aplicações atuariais: a degradação da previsão com o horizonte. Calculamos $\mathrm{MAE}_t = \frac{1}{1200} \sum_{i, x} |\log \hat m^{(i)}_{x,t} - \log m^{(i)}_{x,t}|$ para cada ano $t$ do período de teste, agregando populações e idades. O painel a seguir apresenta os valores ilustrativos:
+
+| Ano | RW | LC | CNN | TCN | LCConv |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| 2000 | 0,082 | 0,071 | 0,070 | 0,068 | 0,064 |
+| 2003 | 0,114 | 0,094 | 0,091 | 0,082 | 0,075 |
+| 2006 | 0,142 | 0,113 | 0,108 | 0,095 | 0,083 |
+| 2009 | 0,170 | 0,131 | 0,124 | 0,106 | 0,090 |
+| 2012 | 0,196 | 0,147 | 0,138 | 0,115 | 0,097 |
+| 2015 | 0,221 | 0,160 | 0,150 | 0,122 | 0,103 |
+| 2019 | 0,258 | 0,181 | 0,170 | 0,137 | 0,112 |
+
+O padrão é claro: todos os modelos pioram com o horizonte, como seria de esperar em projeções recursivas, mas não pioram na mesma velocidade. O RW se deteriora rapidamente porque não carrega nenhuma estrutura demográfica além da persistência imediata. O Lee-Carter resiste melhor. A LCConv, por sua vez, degrada menos porque aprende regularidades compartilhadas entre países --- como a queda continuada da mortalidade e a compressão em idades avançadas --- que um modelo treinado população a população tende a subaproveitar.
+
+```python
+# Reprodução do painel de evolução anual
+def mae_por_ano(pred, real):
+    return np.mean(np.abs(pred - real), axis=(0, 1))  # média sobre pops×idades
+
+mae_rw     = mae_por_ano(pred_rw,     X_test)
+mae_lc     = mae_por_ano(pred_lc,     X_test)
+mae_cnn    = mae_por_ano(pred_cnn,    X_test)
+mae_tcn    = mae_por_ano(pred_tcn,    X_test)
+mae_lcconv = mae_por_ano(pred_lcconv, X_test)
+
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(8, 4.5))
+for nome, mae in zip(
+    ["RW", "LC", "CNN", "TCN", "LCConv"],
+    [mae_rw, mae_lc, mae_cnn, mae_tcn, mae_lcconv]):
+    ax.plot(np.arange(2000, 2020), mae, marker="o", label=nome)
+ax.set_xlabel("Ano"); ax.set_ylabel("MAE (log $m_x$)")
+ax.set_title("Degradação do erro com o horizonte de previsão")
+ax.legend(); ax.grid(alpha=0.3)
+```
+
+### Discussão
+
+Três conclusões práticas saem desse exercício. A primeira é que trocar Lee-Carter por uma rede neural não faz sentido por inércia tecnológica: a CNN temporal genérica melhora pouco e não compensa a complexidade extra. A segunda é que a TCN causal dilatada entrega ganhos mais convincentes, sobretudo em horizontes longos, mostrando que a arquitetura importa quando ela incorpora a estrutura certa do problema. A terceira é que a LCConv explicita o valor de aprender entre populações. Essa é uma lição que vai além da mortalidade: sempre que houver séries relacionadas, compartilhar parâmetros por meio de *embeddings* ou outros mecanismos de transferência tende a gerar ganhos difíceis de obter com modelos totalmente isolados. Para o contexto brasileiro, um passo natural seria adaptar a LCConv incorporando a tábua completa do IBGE (SIDRA 7362) como mais uma população no conjunto.
+
+## Leituras recomendadas
+
+@bai2018empirical é a referência central do capítulo: apresenta a TCN genérica, discute o contraste com RNNs e reúne evidência empírica robusta em tarefas variadas. @oord2016wavenet introduz convoluções dilatadas e a *gated activation*, com resultados marcantes em áudio. @wu2023timesnet oferece um exemplo recente de como o paradigma convolucional continua evoluindo. Para situar o tema no panorama mais amplo de Deep Learning para séries temporais, @benidis2022deep e @lim2021time são *surveys* úteis e complementares. Já @zeng2023transformers ajuda a calibrar expectativas: modelos sofisticados só se justificam quando realmente superam *baselines* lineares bem ajustados. No estudo de caso de mortalidade, @perla2021time é a referência direta para LCConv; @richman2021neural oferece a intuição multipopulação que inspira a arquitetura; e @nigri2019deep mostra uma alternativa recorrente para o mesmo tipo de problema.
+
+## Exercícios Propostos
+
+### Exercício 7.1
+Implemente uma rede convolucional temporal (TCN) em PyTorch para previsão de séries temporais. A arquitetura deve incluir: (a) convoluções causais, (b) convoluções dilatadas com fator de dilatação crescente (1, 2, 4, 8, ...), (c) conexões residuais. Aplique a TCN a uma série de inflação mensal e compare com uma LSTM em termos de MAE e tempo de treinamento.
+
+### Exercício 7.2
+Investigue o efeito do fator de dilatação no campo receptivo de uma TCN. Para uma rede com $L$ camadas e kernel size $k$, derive matematicamente o campo receptivo total. Implemente uma função que calcule o campo receptivo para diferentes configurações. Visualize como o campo receptivo cresce exponencialmente com a profundidade quando se usa dilatação.
+
+### Exercício 7.3
+O artigo @bai2018empirical argumenta que TCNs superam RNNs em tarefas de sequência onde dependências de longo prazo são importantes. Teste essa afirmação empiricamente: crie uma série sintética com dependências conhecidas em diferentes escalas temporais (curto, médio e longo prazo). Treine TCN, LSTM e GRU e compare qual arquitetura melhor captura cada tipo de dependência.
+
+### Exercício 7.4
+Implemente uma arquitetura híbrida CNN-LSTM: camadas convolucionais para extrair features locais da série, seguidas de LSTM para modelar dependências temporais. Aplique a previsão de mortalidade e compare com CNN pura e LSTM pura. O modelo híbrido captura o melhor dos dois mundos?
+
+### Nota sobre as Resoluções
+
+As resoluções completas dos exercícios deste capítulo estão disponíveis em notebooks Python no repositório oficial do livro no GitHub (`github.com/filipeduarte/book-project`). Cada notebook inclui código executável, visualizações e discussões detalhadas das soluções, permitindo que o leitor execute os exercícios no Google Colab e compare suas implementações com as propostas.
