@@ -102,17 +102,43 @@ O notebook `cap03-baselines-estatisticos-solucoes.ipynb`, disponível na pasta `
 Vamos trabalhar com a taxa de mortalidade feminina na idade de 60 anos, período 1950–2020 — totalizando 71 observações anuais, um tamanho de amostra típico de séries demográficas. A coluna `Female` contém $q_x$ (probabilidade anual de morte); multiplicamos por 1 000 para trabalhar em ‰.
 
 ```python
-df_raw = pd.read_csv('../notebooks/mortality_sweden.csv')
+# Configuração inicial e imports
+import numpy as np
+import pyhmfd
+import sidrapy
+from bcb import currency
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy import stats
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.api import SimpleExpSmoothing
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.seasonal import STL
+from statsmodels.tsa.stattools import adfuller, acf, pacf
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+import warnings
+warnings.filterwarnings('ignore')
+
+# Configuração de visualização
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams['figure.figsize'] = (12, 6)
+
+print("Ambiente configurado com sucesso!")
+
+df_raw = pd.read_csv('https://raw.githubusercontent.com/filipeclduarte/book-adpst/refs/heads/main/data/mortality_sweden_1950.csv')
 
 df = (
     df_raw[df_raw['Age'].eq(60) & df_raw['Year'].between(1950, 2020)]
-    .groupby('Year')['Female']
-    .mean()
-    .mul(1000)            # q_x → ‰
-    .rename('taxa_mortalidade')
-    .to_frame()
+    .rename(columns={'Female':'taxa_mortalidade'})
+    .set_index('Year')['taxa_mortalidade']
 )
+
 df.index.name = 'ano'
+
+display(df.head())
 ```
 
 ### Particionamento Temporal
@@ -125,30 +151,92 @@ train = df.iloc[:train_size]
 test  = df.iloc[train_size:]       # 2006–2020
 ```
 
+### Análise estatística da série temporal
+
+
+
+```python
+print('Teste ADF para a série original:')
+adf_test = adfuller(train, autolag='AIC')
+print(f'ADF Statistic: {adf_test[0]:.2f}')
+print(f'p-value: {adf_test[1]:.2f}')
+if adf_test[1] > 0.05:
+    print('A série original NÃO é estacionária. Diferenciando a série.')
+    train_diff = train.diff().dropna()
+else:
+    print('A série original É estacionária. Usando a série original.')
+    train_diff = train
+
+# Fazer análise do acf e pacf da série diferenciada
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+plot_acf(train_diff, ax=ax1, lags=20, title='ACF da Série Diferenciada (ordem 1)')
+ax1.set_ylabel('Autocorrelação')
+
+plot_pacf(train_diff, ax=ax2, lags=20, title='PACF da Série Diferenciada (ordem 1)')
+ax2.set_xlabel('Defasagem')
+ax2.set_ylabel('Autocorrelação Parcial')
+
+plt.tight_layout()
+plt.show()
+```
+
 ### Implementação dos Baselines
 
 Agora implementamos os modelos ingênuos e de suavização exponencial. Para dados anuais sem sazonalidade intranual, o Seasonal Naive é equivalente ao Naive simples; o Holt-Winters sem componente sazonal reduz-se ao método de Holt com tendência.
 
 ```python
-from statsmodels.tsa.api import SimpleExpSmoothing
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from statsmodels.tsa.arima.model import ARIMA
 
 # Naive — último valor observado
-naive_pred = np.full(len(test), train['taxa_mortalidade'].iloc[-1])
+naive_pred = np.full(len(test), train.iloc[-1])
 
 # SES — suavização exponencial simples
-ses_pred = SimpleExpSmoothing(train['taxa_mortalidade'])\
-    .fit(optimized=True).forecast(len(test))
+ses_model = SimpleExpSmoothing(train)\
+    .fit(optimized=True)
+ses_pred_train = ses_model.fittedvalues
+ses_pred = ses_model.forecast(len(test))
 
 # Holt — tendência aditiva amortecida (correto para série anual sem sazonalidade)
-holt_pred = ExponentialSmoothing(
-    train['taxa_mortalidade'], trend='add', damped_trend=True
-).fit(optimized=True).forecast(len(test))
+holt_model = ExponentialSmoothing(
+    train, trend='add', damped_trend=True
+).fit(optimized=True)
+holt_pred_train = holt_model.fittedvalues
+holt_pred = holt_model.forecast(len(test))
 
-# ARIMA(1,1,1) — passeio aleatório com estrutura AR e MA
-arima_pred = ARIMA(train['taxa_mortalidade'], order=(1,1,1))\
-    .fit().forecast(len(test))
+# ARIMA(3,1,1) — passeio aleatório com estrutura AR e MA
+arima_model = ARIMA(train, order=(3,1,1))\
+    .fit()
+arima_pred_train = arima_model.fittedvalues
+arima_pred = arima_model.forecast(len(test))
+
+# plot das previsões e o valor observado para treinamento
+plt.figure(figsize=(12, 6))
+plt.plot(train.index, train, 'g-', label='Treinamento')
+plt.plot(train.index, ses_pred_train, 'm:', label='SES')
+plt.plot(train.index, holt_pred_train, 'b-.', label='Holt')
+plt.plot(train.index[3:], arima_pred_train.iloc[3:], 'k-', label='ARIMA') # Remove os primeiros 3 valores que são NaN (devido à ordem do ARIMA)
+plt.xlabel('Data')
+plt.ylabel('Valor')
+plt.title('Logaritmo da taxa de mortalidade da idade 60 anos e previsão dos modelos estatísticos para o conjunto de treinamento')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# plot das previsões e o valor observado
+plt.figure(figsize=(12, 6))
+plt.plot(test.index, test, 'g-', label='Teste')
+plt.plot(test.index, naive_pred, 'r--', label='Naive')
+plt.plot(test.index, ses_pred, 'm:', label='SES')
+plt.plot(test.index, holt_pred, 'b-.', label='Holt')
+plt.plot(test.index, arima_pred, 'k-', label='ARIMA')
+plt.xlabel('Data')
+plt.ylabel('Valor')
+plt.title('Logaritmo da taxa de mortalidade da idade 60 anos e previsão dos modelos estatísticos para o conjunto de teste')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
 ```
 
 ### Avaliação das Métricas
@@ -165,8 +253,8 @@ previsoes = {'Naive': naive_pred, 'SES': ses_pred,
              'Holt': holt_pred,   'ARIMA': arima_pred}
 
 for nome, fc in previsoes.items():
-    m = mase(test['taxa_mortalidade'].values, np.asarray(fc),
-             train['taxa_mortalidade'].values)
+    m = mase(test.values, np.asarray(fc),
+             train.values)
     print(f"{nome:<8}  MASE = {m:.3f}")
 ```
 
@@ -175,32 +263,30 @@ for nome, fc in previsoes.items():
 A visualização gráfica é essencial para diagnosticar onde cada modelo acerta ou falha sistematicamente. O código abaixo produz dois painéis: o superior compara as previsões dos quatro modelos contra os valores observados no período de teste 2006–2020, e o inferior mostra os erros de previsão ao longo do tempo.
 
 ```python
-import matplotlib.pyplot as plt
-
 anos_teste = test.index
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
 
 # Painel superior: previsões vs. observado
-ax1.plot(df.index, df['taxa_mortalidade'], 'k-', label='Observado', linewidth=1.5)
-cores = {'Naive': '#e41a1c', 'SES': '#377eb8', 'Holt': '#4daf4a', 'ARIMA': '#984ea3'}
+ax1.plot(df.index, df, 'k-', label='Observado', linewidth=1.5)
+cores = {'Naive': '#e41a1c', 'SES': '#377eb8', 'Holt': '#4daf4a', 'ARIMA': '#984ea3'} # cor diferente para cada modelo
 for nome, fc in previsoes.items():
     ax1.plot(anos_teste, np.asarray(fc), '--', color=cores[nome],
              label=nome, linewidth=1.2)
-ax1.axvline(anos_teste[0], color='gray', linestyle=':', linewidth=1)
-ax1.set_ylabel('Taxa de mortalidade (‰)')
+ax1.axvline(anos_teste[0], color='gray', linestyle=':', linewidth=1) # Linha vertical para destacar a separação dos dados
+ax1.set_ylabel('Logaritmo da taxa de mortalidade')
 ax1.legend(ncol=2, fontsize=9)
 
-# Painel inferior: erros de previsão
+# Painel inferior: erros % de previsão 
 for nome, fc in previsoes.items():
-    erros = test['taxa_mortalidade'].values - np.asarray(fc)
+    erros = test.values - np.asarray(fc)
     ax2.plot(anos_teste, erros, '--', color=cores[nome], label=nome, linewidth=1.2)
 ax2.axhline(0, color='black', linewidth=0.8)
 ax2.set_ylabel('Erro de previsão (‰)')
 ax2.set_xlabel('Ano')
 
 plt.tight_layout()
-plt.savefig('../images/fig-baselines-mortalidade.png', dpi=150, bbox_inches='tight')
+plt.savefig('../images/fig-baselines-mortalidade.png', dpi=150, bbox_inches='tight') # salvar as figuras
 plt.show()
 ```
 
@@ -213,14 +299,14 @@ import pandas as pd
 
 min_train = 20   # mínimo de observações para treino
 horizon   = 5    # anos à frente avaliados em cada dobra
-step      = 3    # avança 3 anos entre dobras
+step      = 3    # avança 3 anos 
 
 n = len(df)
 resultados = []
 
 for start in range(min_train, n - horizon, step):
-    tr = df.iloc[:start]['taxa_mortalidade']
-    te = df.iloc[start:start + horizon]['taxa_mortalidade']
+    tr = df.iloc[:start]
+    te = df.iloc[start:start + horizon]
 
     fc_naive = np.full(len(te), tr.iloc[-1])
     fc_ses   = SimpleExpSmoothing(tr).fit(optimized=True).forecast(len(te))
@@ -238,7 +324,7 @@ cv_summary = cv_df.groupby('modelo')['MASE'].agg(['mean', 'std'])
 print(cv_summary.round(3))
 ```
 
-O parâmetro `step=3` gera uma dobra a cada 3 anos — suficiente para capturar a variabilidade de desempenho em séries demográficas sem custo computacional excessivo.
+O parâmetro `step=3` gera uma salto a cada 3 anos — suficiente para capturar a variabilidade de desempenho em séries demográficas sem custo computacional excessivo.
 
 ### Análise de Resíduos
 
@@ -247,11 +333,34 @@ A qualidade de um modelo não se mede apenas pelo erro médio, mas também pela 
 ```python
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
-residuos = test['taxa_mortalidade'].values - np.asarray(holt_pred)
+# Holt
+residuos = train.values - np.asarray(holt_pred_train)
 lb = acorr_ljungbox(residuos, lags=5, return_df=True)
 
 # p > 0.05: não há autocorrelação — resíduos se comportam como ruído branco
+print('HOLT')
 print(lb[['lb_stat', 'lb_pvalue']])
+print('-'*25)
+
+# Arima
+residuos_arima = train.values - np.asarray(arima_pred_train)
+lb_arima = acorr_ljungbox(residuos_arima, lags=5, return_df=True)
+
+# p > 0.05: não há autocorrelação — resíduos se comportam como ruído branco
+print('ARIMA')
+print(lb_arima[['lb_stat', 'lb_pvalue']])
+
+# Visualização dos resíduos
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+ax1.plot(residuos, 'k-', label='HOLT')
+ax2.plot(residuos_arima[3:], 'r--', label='ARIMA')
+
+ax1.set_ylabel('Resíduos')
+ax1.legend(ncol=2, fontsize=9)
+ax2.set_ylabel('Resíduos')
+ax2.legend(ncol=2, fontsize=9)
+
+plt.show()
 ```
 
 Um diagnóstico completo inclui ainda histograma dos resíduos, Q-Q plot e gráfico de resíduos versus valores previstos — todos disponíveis no notebook.
