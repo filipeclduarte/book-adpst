@@ -383,7 +383,7 @@ Em síntese, antes de embarcar na jornada das Deep Learning apresentadas nas pr�
 ## Exercícios Propostos
 
 ### Exercício 3.1
-Utilizando os dados da Human Mortality Database para a Suécia, disponíveis no arquivo `notebooks/mortality_sweden.csv` do repositório do livro (ou via pacote `pyhmfd`, ou baixados diretamente em [mortality.org](https://www.mortality.org)), carregue as taxas de mortalidade femininas para a idade de 60 anos, período 1950–2020. Implemente os modelos Naive, Seasonal Naive e Holt-Winters. Calcule o MASE para cada modelo em previsões de 1 a 5 anos à frente. Qual modelo apresenta melhor desempenho? Por quê?
+Utilizando os dados da Human Mortality Database para a Suécia, disponíveis no arquivo `notebooks/mortality_sweden.csv` do repositório do livro (ou via pacote `pyhmfd`, ou baixados diretamente em [mortality.org](https://www.mortality.org)), carregue as taxas de mortalidade da população total para a idade de 64 anos, período 1950–2020. Implemente os modelos Naive, Seasonal Naive e Holt-Winters. Calcule o MASE para cada modelo em previsões de 1 a 5 anos à frente. Qual modelo apresenta melhor desempenho? Por quê?
 
 ### Exercício 3.2
 Baixe a série do IPCA brasileiro do SIDRA/IBGE (tabela 1737) de 2000 a 2023. Implemente uma função de validação cruzada temporal com janela expansiva para comparar três modelos: Naive, SES (Suavização Exponencial Simples) e ARIMA automático. Reporte MAE, RMSE e MASE médios sobre as dobras. Visualize as distribuições dos erros.
@@ -392,4 +392,4 @@ Baixe a série do IPCA brasileiro do SIDRA/IBGE (tabela 1737) de 2000 a 2023. Im
 Ajuste um modelo Holt-Winters aos dados de taxa de câmbio BRL/USD (dados do BCB, série 1) para o período 2019-2023. Experimente ambas as variantes: sazonalidade aditiva e multiplicativa. Use validação cruzada com janela deslizante de 60 dias para determinar qual variante produz menores erros de previsão em horizontes de 1, 5 e 10 dias.
 
 ### Exercício 3.4
-Implemente uma função em Python que execute o algoritmo completo de seleção de ordem SARIMA: (1) teste de estacionariedade ADF, (2) identificação visual de FAC/FACP, (3) ajuste de múltiplos candidatos, (4) seleção por AIC/BIC, (5) diagnóstico de resíduos com teste de Ljung-Box. Aplique sua função a uma série de mortalidade do IBGE e reporte o modelo selecionado.
+Explique por que o MASE é preferível ao MAPE para avaliar previsões de séries temporais econômicas. Dê um exemplo numérico onde o MAPE falha mas o MASE permanece bem comportado. Implemente ambas as métricas em Python e compare os resultados ao aplicá-las às previsões do Exercício 3.1.
