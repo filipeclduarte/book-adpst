@@ -75,15 +75,55 @@ A escolha entre sazonalidade aditiva e multiplicativa depende da natureza da sé
 
 ## Modelos ARIMA: A Estatística Linear Clássica em Ação
 
-Os modelos ARIMA (*AutoRegressive Integrated Moving Average*) constituem o pilar da estatística de séries temporais desde a publicação seminal de @box1976time, que estabeleceu o framework metodológico conhecido como "metodologia de Box-Jenkins" para identificação, estimação e diagnóstico de modelos autorregressivos integrados de médias móveis. A elegância do ARIMA reside em decompor o comportamento de uma série em três componentes fundamentais que capturam diferentes aspectos da dinâmica temporal.
+Imagine que você está acompanhando o IPCA mês a mês. Você nota que quando a inflação sobe em outubro, ela tende a continuar elevada em novembro — e que um choque pontual, como um reajuste de combustíveis, ainda deixa rastro nos meses seguintes mesmo depois de absorvido. Como modelar essas duas forças ao mesmo tempo: a inércia dos valores passados e o eco dos choques recentes?
 
-O componente **AR** (*AutoRegressive*, ordem $p$) modela a dependência linear entre uma observação e seus valores defasados (*lags*). Se a inflação de um mês tende a correlacionar-se com a inflação dos três meses anteriores, um termo AR(3) captura essa relação. O componente **I** (*Integrated*, ordem $d$) lida com não-estacionariedade através de diferenciações sucessivas. Uma série não-estacionária — como o PIB nominal brasileiro, que cresce sistematicamente ao longo do tempo — é transformada em estacionária subtraindo-se cada observação da anterior ($y_t - y_{t-1}$), permitindo a aplicação de técnicas que assumem média constante. O componente **MA** (*Moving Average*, ordem $q$) modela o erro de previsão como uma combinação linear de erros passados, capturando choques temporários que persistem por alguns períodos.
+É exatamente para isso que servem os modelos **ARIMA** (*AutoRegressive Integrated Moving Average*). Desde a obra seminal de @box1976time — que estabeleceu o que hoje chamamos de "metodologia Box-Jenkins" —, os modelos ARIMA se tornaram o ponto de partida obrigatório na análise de séries temporais econômicas e demográficas.
 
-A notação $ARIMA(p, d, q)$ identifica as ordens de cada componente. Um $ARIMA(1, 1, 1)$ possui um termo autorregressivo, uma diferenciação e um termo de média móvel.
+A notação $ARIMA(p, d, q)$ identifica as ordens de cada um dos três componentes:
 
-Quando a sazonalidade está presente, estendemos o modelo para **SARIMA** (*Seasonal ARIMA*), adicionando parâmetros sazonais $(P, D, Q)_m$ que operam no período sazonal $m$. Um $SARIMA(1, 1, 1)(1, 1, 1)_{12}$ é um modelo mensal com estrutura ARIMA tanto na frequência regular quanto na frequência anual.
+**AR — Autorregressivo (ordem $p$).** O nome diz tudo: a série se regride sobre si mesma. A ideia é que o valor de hoje pode ser explicado pelos $p$ valores anteriores. Se a inflação de um mês tende a correlacionar-se com a dos três meses anteriores, um componente AR(3) captura essa dependência:
 
-A identificação dos parâmetros $(p, d, q)$ e $(P, D, Q)$ segue um processo diagnóstico: analisamos a função de autocorrelação (FAC) e a função de autocorrelação parcial (FACP) da série, testamos a estacionariedade com testes formais (ADF, KPSS), e ajustamos modelos candidatos selecionando aquele com menor critério de informação (AIC ou BIC). Esta abordagem diagnóstica, embora mais trabalhosa que métodos automatizados, oferece insights valiosos sobre a estrutura da série.
+$$y_t = c + \phi_1 y_{t-1} + \phi_2 y_{t-2} + \phi_3 y_{t-3} + \varepsilon_t$$
+
+onde $\phi_1, \phi_2, \phi_3$ são os coeficientes autorregressivos e $\varepsilon_t$ é o erro aleatório no instante $t$.
+
+**I — Integrado (ordem $d$).** Antes de estimar qualquer coisa, precisamos que a série seja *estacionária* — isto é, que sua média e variância não mudem ao longo do tempo. O PIB nominal brasileiro não é estacionário: ele cresce sistematicamente. A solução é *diferenciar* a série: em vez de modelar $y_t$, modelamos $\Delta y_t = y_t - y_{t-1}$ (a variação de um período para o outro). Se uma diferenciação é suficiente para estabilizar a série, dizemos que $d = 1$.
+
+::: {.callout-note}
+## Estacionariedade: por que isso importa?
+
+Uma série é **estacionária** quando seus parâmetros estatísticos — média, variância e autocorrelações — permanecem constantes ao longo do tempo. Modelos ARIMA exigem estacionariedade para que suas estimativas sejam estáveis e interpretáveis. Na prática, testamos essa propriedade com testes formais como o ADF (*Augmented Dickey-Fuller*) e o KPSS antes de decidir quantas diferenciações aplicar.
+:::
+
+**MA — Média Móvel dos Erros (ordem $q$).** Choques aleatórios — uma crise cambial, um desastre natural, um decreto de emergência — não somem instantaneamente. O componente MA modela o quanto esses erros passados ainda influenciam o valor atual da série. Um $MA(1)$ significa que o erro de ontem ainda repercute hoje:
+
+$$y_t = c + \varepsilon_t + \theta_1 \varepsilon_{t-1}$$
+
+onde $\theta_1$ captura a intensidade com que o choque do período anterior persiste.
+
+Reunindo os três componentes, um $ARIMA(1, 1, 1)$ é um modelo com um termo autorregressivo, uma diferenciação e um termo de média móvel — frequentemente um bom ponto de partida para séries econômicas moderadamente persistentes.
+
+### Como identificar os parâmetros $(p, d, q)$?
+
+A identificação segue um processo diagnóstico em três etapas:
+
+1. **Determinar $d$:** verificar se a série é estacionária; se não for, diferenciá-la até que seja. Testes ADF e KPSS ajudam nessa decisão.
+2. **Analisar FAC e FACP:** a *função de autocorrelação* (FAC) e a *função de autocorrelação parcial* (FACP) da série diferenciada revelam padrões característicos que sugerem os valores de $p$ e $q$ — picos que cortam abruptamente ou decaem gradualmente indicam estruturas AR ou MA.
+3. **Comparar modelos candidatos:** ajustar alguns modelos plausíveis e selecionar aquele com menor critério de informação (AIC ou BIC), que penaliza modelos excessivamente complexos.
+
+Embora mais trabalhosa que métodos automatizados como o `auto_arima`, essa abordagem diagnóstica constrói intuição sobre a estrutura da série — o que é valioso quando você precisa justificar suas escolhas para um regulador ou orientar uma equipe.
+
+::: {.callout-tip}
+## ARIMA na prática: use `AutoARIMA` para explorar, interprete para comunicar
+
+A biblioteca `statsforecast` oferece um `AutoARIMA` eficiente que automatiza a busca pelos melhores $(p, d, q)$. Use-o para triagem rápida — mas ao apresentar resultados, sempre interprete o que cada componente significa na série que você está analisando.
+:::
+
+### Extensão sazonal: SARIMA
+
+Quando a série exibe sazonalidade — como óbitos que aumentam sistematicamente no inverno, ou vendas que disparam em dezembro —, estendemos o modelo para **SARIMA** (*Seasonal ARIMA*), adicionando um bloco sazonal de parâmetros $(P, D, Q)_m$, onde $m$ é o período sazonal (por exemplo, $m = 12$ para dados mensais com padrão anual).
+
+A notação completa $SARIMA(p, d, q)(P, D, Q)_m$ pode parecer intimidadora, mas a lógica é a mesma: o bloco $(p, d, q)$ cuida das dependências de curto prazo e o bloco $(P, D, Q)_m$ cuida das dependências que se repetem a cada $m$ períodos.
 
 ## Estudo de Caso: Previsão de Taxas de Mortalidade — Suécia (HMD)
 
@@ -385,8 +425,275 @@ Em síntese, antes de embarcar na jornada das Deep Learning apresentadas nas pr�
 ### Exercício 3.1
 Utilizando os dados da Human Mortality Database para a Suécia, disponíveis no arquivo `notebooks/mortality_sweden.csv` do repositório do livro (ou via pacote `pyhmfd`, ou baixados diretamente em [mortality.org](https://www.mortality.org)), carregue as taxas de mortalidade da população total para a idade de 64 anos, período 1950–2020. Implemente os modelos Naive, Seasonal Naive e Holt-Winters. Calcule o MASE para cada modelo em previsões de 1 a 5 anos à frente. Qual modelo apresenta melhor desempenho? Por quê?
 
-### Exercício 3.2
-Baixe a série do IPCA brasileiro do SIDRA/IBGE (tabela 1737) de 2000 a 2023. Implemente uma função de validação cruzada temporal com janela expansiva para comparar três modelos: Naive, SES (Suavização Exponencial Simples) e ARIMA automático. Reporte MAE, RMSE e MASE médios sobre as dobras. Visualize as distribuições dos erros.
+### Exercício 3.2 — Comparando Baselines para o IPCA com Validação Cruzada
+
+#### Contexto
+
+O IPCA (Índice Nacional de Preços ao Consumidor Amplo) é o índice oficial de inflação do Brasil,
+medido mensalmente pelo IBGE desde 1980. Ele é a variável que o Banco Central do Brasil observa
+para decidir se sobe ou reduz a taxa Selic, e é o índice usado para corrigir contratos de aluguel,
+planos de saúde, aposentadorias pelo INSS e muitas obrigações contratuais. Prever o IPCA mensal é
+uma tarefa presente em qualquer departamento de economia, tesouro corporativo ou consultoria
+atuarial brasileira.
+
+Neste exercício, você vai aplicar a metodologia de validação cruzada temporal com janela expansiva
+— a mesma apresentada no estudo de caso deste capítulo — para comparar três modelos de previsão em
+dados reais de inflação. Ao final, você será capaz de responder: *entre Naive, SES e ARIMA
+automático, qual funciona melhor para prever o IPCA no próximo mês, e essa superioridade é
+consistente ao longo do tempo ou depende do período?*
+
+#### O que você vai entregar
+
+Ao concluir o exercício, você deve ter produzido:
+
+1. A série histórica do IPCA mensal (variação %) de janeiro de 2000 a dezembro de 2023 carregada
+   em um `pandas.Series` com índice de datas mensais.
+2. Uma função de validação cruzada com janela expansiva que ajusta os três modelos e coleta as
+   métricas por dobra.
+3. Uma tabela-resumo com MAE médio, RMSE médio e MASE médio para cada modelo.
+4. Um gráfico de boxplot (ou violin plot) comparando a distribuição do MASE entre os modelos ao
+   longo das dobras.
+5. Um parágrafo curto interpretando os resultados: qual modelo escolheria? Por quê?
+
+---
+
+#### Passo 1 — Baixando os dados do IPCA via SIDRA/IBGE
+
+O IBGE disponibiliza o IPCA na tabela **1737** do sistema SIDRA. A variável que nos interessa é a
+**63**, que corresponde à variação percentual mensal (IPCA % a.m.) — o valor que aparece nos
+noticiários como "o IPCA de março foi de 0,71%".
+
+O pacote `sidrapy` (já instalado no ambiente do livro) permite acessar esses dados diretamente em
+Python, sem download manual de planilhas:
+
+```python
+import sidrapy
+import pandas as pd
+
+# Baixa o IPCA mensal: tabela 1737, variável 63 (variação % mensal)
+# Período: jan/2000 a dez/2023 (formato AAAAMM: 200001 a 202312)
+raw = sidrapy.get_table(
+    table_code="1737",
+    territorial_level="1",   # Brasil (nível nacional)
+    ibge_territorial_code="all",
+    variable="63",
+    period="200001-202312"
+)
+
+# As primeiras linhas do retorno são cabeçalho — pulamos com iloc[1:]
+# A coluna "V" contém os valores; convertemos para numérico
+ipca = (
+    raw.iloc[1:]
+       .assign(data=lambda df: pd.to_datetime(df["D2C"], format="%Y%m"))
+       .set_index("data")["V"]
+       .astype(float)
+       .rename("ipca_pct")
+)
+
+print(f"Observações: {len(ipca)}")  # Deve ser 288 (24 anos × 12 meses)
+print(ipca.head())
+```
+
+::: {.callout-tip}
+## Por que variável 63 e não 69?
+
+A tabela 1737 tem várias variáveis: 63 é a variação **mensal** (ex.: 0,71% em março); 69 é a
+variação **acumulada no ano** (ex.: 1,42% acumulado até março). Para previsão de séries
+temporais, trabalhamos com a variação mensal — ela é estacionária após períodos de crise
+e mantém a frequência adequada para modelos ARIMA.
+:::
+
+---
+
+#### Passo 2 — Entendendo a validação cruzada com janela expansiva
+
+Na @sec-cap02, discutimos por que não podemos embaralhar os dados em séries temporais como se faz
+em machine learning supervisionado clássico: o futuro não pode vazar para o treino. A **validação
+cruzada com janela expansiva** resolve isso criando múltiplas partições respeitando a ordem
+cronológica: a cada dobra, a janela de treino cresce em `step` observações, e o modelo é avaliado
+nas próximas `horizon` observações.
+
+O mesmo padrão já foi implementado no estudo de caso deste capítulo (seção "Validação Cruzada
+Temporal"). Adapte-o para o IPCA definindo os seguintes parâmetros de partida:
+
+- `min_train = 36` — mínimo de 36 meses (3 anos) para estimar o primeiro modelo
+- `horizon = 6` — avalia a previsão dos próximos 6 meses em cada dobra
+- `step = 3` — avança 3 meses a cada dobra (sem reusar as mesmas observações de teste)
+
+Com 288 observações e esses parâmetros, você obterá aproximadamente 83 dobras — uma distribuição
+de erros estatisticamente robusta.
+
+---
+
+#### Passo 3 — Os três modelos
+
+**Naive**: a previsão para os próximos `horizon` meses é simplesmente o último valor observado no
+treino. É o modelo mais simples possível e serve como piso de comparação: qualquer método que não
+supere o Naive não tem utilidade prática.
+
+**SES (Suavização Exponencial Simples)**: pondera o histórico com pesos exponencialmente
+decrescentes. O parâmetro $\alpha$ é otimizado automaticamente; use `optimized=True` da
+implementação do `statsmodels`. Adequado para séries sem tendência dominante — o que, para o
+IPCA mensal em um período longo, tende a ser razoável.
+
+**ARIMA automático**: em vez de identificar manualmente os parâmetros $(p, d, q)$ via FAC e
+FACP — o processo diagnóstico descrito na seção anterior deste capítulo —, o `AutoARIMA` da
+biblioteca `statsforecast` testa combinações de parâmetros e seleciona o modelo com menor AIC
+automaticamente. Instale se necessário:
+
+```python
+# Execute no terminal ou em uma célula do notebook (apenas uma vez)
+# pip install statsforecast
+```
+
+```python
+import numpy as np
+from statsmodels.tsa.api import SimpleExpSmoothing
+from statsmodels.tsa.arima.model import ARIMA
+from statsforecast import StatsForecast
+from statsforecast.models import AutoARIMA
+import warnings
+warnings.filterwarnings("ignore")
+
+# Reutilize a função mase() do estudo de caso deste capítulo
+def mase(y_true, y_pred, y_train):
+    """MASE: erro do modelo escalado pelo erro do naive."""
+    mae_naive = np.mean(np.abs(np.diff(y_train)))
+    mae_model = np.mean(np.abs(y_true - y_pred))
+    return mae_model / mae_naive
+
+def rmse(y_true, y_pred):
+    return np.sqrt(np.mean((y_true - y_pred) ** 2))
+
+# --- Loop de validação cruzada ---
+min_train = 36
+horizon   = 6
+step      = 3
+
+resultados = []
+
+for start in range(min_train, len(ipca) - horizon, step):
+    tr = ipca.iloc[:start]          # janela de treino (cresce a cada dobra)
+    te = ipca.iloc[start:start + horizon]  # janela de teste
+
+    # Naive: repete o último valor observado
+    fc_naive = np.full(len(te), tr.iloc[-1])
+
+    # SES: parâmetro alpha otimizado automaticamente
+    fc_ses = (
+        SimpleExpSmoothing(tr)
+        .fit(optimized=True)
+        .forecast(len(te))
+        .values
+    )
+
+    # AutoARIMA: seleciona (p,d,q) automaticamente por AIC
+    # O statsforecast espera um DataFrame com colunas 'unique_id', 'ds', 'y'
+    df_sf = pd.DataFrame({
+        "unique_id": "IPCA",
+        "ds": tr.index,
+        "y": tr.values
+    })
+    sf = StatsForecast(models=[AutoARIMA(season_length=12)], freq="MS")
+    sf.fit(df_sf)
+    fc_arima = sf.predict(h=len(te))["AutoARIMA"].values
+
+    for nome, fc in [("Naive", fc_naive), ("SES", fc_ses), ("AutoARIMA", fc_arima)]:
+        resultados.append({
+            "modelo": nome,
+            "dobra":  start,
+            "MAE":    np.mean(np.abs(te.values - fc)),
+            "RMSE":   rmse(te.values, fc),
+            "MASE":   mase(te.values, fc, tr.values),
+        })
+
+cv_df = pd.DataFrame(resultados)
+```
+
+::: {.callout-warning}
+## AutoARIMA pode ser lento em muitas dobras
+
+Com 80+ dobras, o loop pode levar alguns minutos porque o AutoARIMA reestima o modelo do zero
+em cada dobra. Se o tempo for um problema, você pode reduzir o número de dobras aumentando
+`step` para 6 ou 12, ou usar um ARIMA de ordem fixa — por exemplo, `ARIMA(tr, order=(1,1,0))`
+do `statsmodels` — como aproximação para ganhar velocidade.
+:::
+
+---
+
+#### Passo 4 — Tabela de resultados
+
+Agrupe o `cv_df` por modelo e calcule a média de cada métrica:
+
+```python
+resumo = cv_df.groupby("modelo")[["MAE", "RMSE", "MASE"]].mean().round(4)
+print(resumo.sort_values("MASE"))
+```
+
+A tabela resultante permite uma leitura direta: o modelo com menor MASE médio é aquele que, em
+média ao longo de todas as dobras, produziu erros menores do que o Naive. Um MASE médio de 0,85,
+por exemplo, significa que o modelo errou 15% menos que o Naive, em média.
+
+---
+
+#### Passo 5 — Visualizando a distribuição dos erros
+
+A média esconde variabilidade. Um modelo com MASE médio de 0,85 pode ser consistente (erros
+próximos ao valor médio na maioria das dobras) ou instável (erros muito baixos em períodos calmos
+e muito altos em crises). O boxplot revela isso:
+
+```python
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(8, 5))
+modelos = cv_df["modelo"].unique()
+dados_box = [cv_df.loc[cv_df["modelo"] == m, "MASE"].values for m in modelos]
+
+ax.boxplot(dados_box, labels=modelos, patch_artist=True)
+ax.axhline(1.0, color="red", linestyle="--", linewidth=1,
+           label="MASE = 1 (nível do Naive)")
+ax.set_ylabel("MASE por dobra")
+ax.set_title("Distribuição do MASE — Validação Cruzada IPCA (2000–2023)")
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+
+A linha vermelha em `MASE = 1` é o nível do Naive: caixas inteiramente abaixo dessa linha
+indicam que o modelo supera o Naive de forma consistente; caixas cruzando a linha indicam que
+o modelo é melhor na média, mas pior que o Naive em algumas dobras.
+
+---
+
+#### Como interpretar os resultados
+
+Ao analisar a tabela e o gráfico, responda às seguintes perguntas no seu relatório:
+
+1. **Qual modelo tem o menor MASE médio?** A diferença é grande o suficiente para importar na
+   prática, ou é marginal (diferença menor que 5%)?
+
+2. **Qual modelo tem a menor variância de MASE?** No contexto de previsão do IPCA para
+   planejamento orçamentário, um modelo mais confiável (menor desvio padrão entre dobras) pode
+   ser preferível a um modelo mais preciso em média mas imprevisível.
+
+3. **Há dobras em que o Naive supera todos os outros?** Identifique os períodos correspondentes
+   (use `cv_df[cv_df["modelo"] == "Naive"].sort_values("MASE")` para localizar as dobras extremas).
+   Esses períodos coincidem com eventos de ruptura estrutural — como a crise de 2008, a
+   pandemia de 2020 ou os choques cambiais de 2002 e 2015? Quando choques imprevisíveis dominam
+   a dinâmica da inflação, modelos sofisticados tendem a falhar da mesma forma que modelos
+   simples, pois o erro é inerentemente irreduível.
+
+4. **O AutoARIMA justifica seu custo computacional?** Se a melhoria sobre o SES for pequena (< 10%
+   de redução no MASE), o SES pode ser a escolha mais pragmática para previsão operacional de
+   curto prazo.
+
+::: {.callout-note}
+## Solução completa no notebook
+
+O notebook `cap03-baselines-estatisticos-solucoes.ipynb`, na pasta `notebooks/` do repositório,
+contém o código completo e executável deste exercício, incluindo a visualização adicional do
+MASE por dobra ao longo do tempo (útil para identificar instabilidade em períodos de crise).
+:::
 
 ### Exercício 3.3
 Ajuste um modelo Holt-Winters aos dados de taxa de câmbio BRL/USD (dados do BCB, série 1) para o período 2019-2023. Experimente ambas as variantes: sazonalidade aditiva e multiplicativa. Use validação cruzada com janela deslizante de 60 dias para determinar qual variante produz menores erros de previsão em horizontes de 1, 5 e 10 dias.

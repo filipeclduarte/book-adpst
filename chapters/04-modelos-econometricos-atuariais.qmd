@@ -4,15 +4,88 @@ Até agora o livro tratou séries temporais uma de cada vez: você olha para o p
 
 Duas coisas tornam esse problema mais bem-comportado do que séries econômicas típicas. Primeiro, a mortalidade cai de maneira bastante regular há décadas, em quase todos os países com registros civis decentes. Segundo, idades vizinhas se movem juntas: a taxa dos 59 anos no ano $t$ traz muita informação sobre a dos 60 no mesmo ano. Essa regularidade abre espaço para modelos parcimoniosos. Os três que dominam a prática internacional — Lee-Carter, Cairns-Blake-Dowd e Renshaw-Haberman — são, no fundo, diferentes escolhas sobre como resumir a matriz em poucos fatores e como projetá-los adiante. É isto que veremos a seguir.
 
-## O modelo Lee-Carter
+## O modelo Lee-Carter: lendo o futuro nas tábuas de mortalidade
 
-A proposta de @lee1992modeling apareceu no *Journal of the American Statistical Association* em 1992 e, três décadas depois, ainda é o ponto de partida de praticamente todo sistema oficial de projeção demográfica. A razão do sucesso é quase estética: o modelo reduz uma matriz de taxas a três objetos interpretáveis.
+Imagine que você é um atuário do INSS em 1992 e precisa responder a uma pergunta aparentemente simples: quantos anos, em média, um brasileiro de 65 anos ainda vai viver? A resposta não é fixa — ela muda ao longo do tempo, porque a mortalidade vem caindo sistematicamente há décadas. Um modelo que ignora essa tendência vai superestimar os óbitos, subestimar o custeio da previdência, e colocar em risco o equilíbrio financeiro do sistema.
 
-$$
-\ln(m_{x,t}) = a_x + b_x k_t + \varepsilon_{x,t}
-$$
+O modelo Lee-Carter [@lee1992modeling] foi criado exatamente para capturar essa dinâmica: *como a mortalidade de cada faixa etária evolui ao longo do tempo?*
 
-Pense nessa equação assim. O termo $a_x$ é o perfil etário médio da mortalidade — a "forma" da curva, alta nos extremos e com o mínimo perto dos dez anos, que todo demógrafo reconhece de olhos fechados. O índice $k_t$ é um resumo unidimensional do tempo: um número por ano que caminha para baixo à medida que a sociedade fica mais saudável. E $b_x$ diz quanto cada idade reage quando $k_t$ anda um passo — idades que respondem mais têm $b_x$ maior. Projetar o futuro vira, então, um problema de prever uma série só: basta modelar $k_t$, tipicamente como um passeio aleatório com deriva, e reconstituir as taxas por idade pela própria equação do modelo.
+### A ideia em linguagem simples
+
+O ponto de partida é uma observação empírica: quando a mortalidade melhora (por avanços médicos, saneamento, vacinação), ela não melhora da mesma forma para todas as idades ao mesmo tempo. Bebês se beneficiaram enormemente da queda da mortalidade infantil nos anos 1970–1990; idosos muito velhos (90+) são mais difíceis de "salvar". Cada faixa etária tem sua própria velocidade de melhoria.
+
+O Lee-Carter separa esse fenômeno em três peças:
+
+1. **O perfil etário médio** — como a mortalidade se distribui por idade *em média*, ao longo de todo o período observado. Crianças têm mortalidade baixa, jovens adultos têm um pequeno pico (causas externas, acidentes), e idosos têm mortalidade crescente. Essa curva em forma de "J" é estável e reflete a biologia humana.
+
+2. **A sensibilidade de cada idade** — o quanto cada faixa etária "responde" quando a mortalidade geral melhora ou piora. Idades com sensibilidade alta caem mais rápido quando há progresso; idades com sensibilidade baixa ficam relativamente estagnadas.
+
+3. **O índice temporal** — um número único que resume o nível geral de mortalidade em cada ano. Quando esse índice cai, a mortalidade está melhorando em todo o país; quando sobe, está piorando. Projetar a mortalidade futura se reduz a projetar esse único índice.
+
+### A formalização
+
+Chamamos $m_{x,t}$ a taxa central de mortalidade para a idade $x$ no ano $t$ — grosso modo, a proporção de pessoas dessa idade que morreram naquele ano. O modelo descreve o logaritmo dessa taxa como:
+
+$$\ln(m_{x,t}) = a_x + b_x \cdot k_t + \varepsilon_{x,t}$$
+
+onde:
+
+- $a_x$ é o **perfil etário médio** — o logaritmo da taxa de mortalidade "típica" da idade $x$, calculado como a média ao longo de todos os anos observados. É a âncora da curva por idade.
+- $b_x$ é a **sensibilidade da idade $x$** — o quanto a mortalidade dessa faixa etária varia quando o índice temporal muda uma unidade. Valores altos de $b_x$ indicam que aquela idade é mais "responsiva" às tendências gerais.
+- $k_t$ é o **índice temporal** — captura o nível geral de mortalidade no ano $t$. Uma queda em $k_t$ ao longo do tempo representa a melhoria secular da mortalidade.
+- $\varepsilon_{x,t}$ é o termo de erro — variações que o modelo não captura (surtos de doenças, anomalias climáticas, etc.).
+
+::: {.callout-note}
+**Por que usar o logaritmo?**
+
+Taxas de mortalidade variam em ordens de magnitude: a taxa de um bebê de 0 anos pode ser 100 vezes maior que a de um adulto de 25 anos. Trabalhar com $\ln(m_{x,t})$ em vez de $m_{x,t}$ comprime essa escala e garante que o modelo trate proporcionalmente as mudanças em todas as idades — uma redução de 50% na mortalidade de bebês e uma redução de 50% na mortalidade de idosos têm o mesmo peso no logaritmo.
+:::
+
+### Estimação: o que é SVD e por que precisamos dela
+
+Para estimar $a_x$, $b_x$ e $k_t$ a partir dos dados, usamos uma técnica chamada **decomposição em valores singulares** (SVD, do inglês *Singular Value Decomposition*). Não se preocupe se você nunca ouviu esse nome — a intuição é simples.
+
+Pense na matriz de log-taxas centralizada (subtraído $a_x$ de cada linha) como uma tabela: linhas são idades, colunas são anos. A SVD encontra o "padrão dominante" dessa tabela — a combinação de um vetor por idade ($b_x$) e um vetor por ano ($k_t$) que melhor reproduz a tabela inteira. É como encontrar a "tendência principal" por trás de todos os movimentos simultâneos de mortalidade.
+
+Para que a solução seja única (o modelo tem infinitas soluções equivalentes se não fixarmos escala), impõe-se duas restrições de **identificação**:
+
+$$\sum_x b_x = 1 \qquad \text{e} \qquad \sum_t k_t = 0$$
+
+A primeira garante que $b_x$ seja interpretado como uma distribuição de sensibilidades (soma 1, como uma proporção). A segunda centraliza o índice temporal em torno de zero, de modo que $a_x$ represente realmente a média histórica.
+
+::: {.callout-tip}
+**Na prática com Python**, você não precisa implementar a SVD do zero. As funções `numpy.linalg.svd` ou `scipy.linalg.svd` fazem a decomposição diretamente — veja o exemplo de código na @sec-lee-carter-codigo.
+:::
+
+### Projetando o futuro: o índice $k_t$ como passeio aleatório
+
+Uma vez estimado $k_t$ para os anos históricos, como projetamos os valores futuros?
+
+Observe o comportamento típico de $k_t$ ao longo do tempo: ele tende a cair de forma relativamente regular, com pequenas flutuações ao redor de uma tendência de queda. Esse comportamento é bem capturado por um **passeio aleatório com deriva** — em termos de modelos ARIMA, um ARIMA(0,1,0) com constante:
+
+$$k_t = k_{t-1} + c + \eta_t$$
+
+onde $c$ é a **deriva** (a queda média anual do índice) e $\eta_t$ é ruído aleatório. A ideia é simples: cada ano, o índice de mortalidade cai em média $c$ unidades em relação ao ano anterior, com alguma aleatoriedade ao redor dessa tendência.
+
+::: {.callout-warning}
+**Limitação importante:** o passeio aleatório com deriva assume que a tendência de melhoria da mortalidade continuará indefinidamente no mesmo ritmo. Isso pode ser razoável no médio prazo, mas no longo prazo há debate: há um limite biológico para a expectativa de vida? O modelo Lee-Carter não responde a essa pergunta — ele extrapola a tendência histórica. Para horizontes muito longos (50+ anos), use os intervalos de confiança com cautela.
+:::
+
+### Resumo do fluxo de trabalho
+
+```
+Dados históricos de m_{x,t}
+        ↓
+Calcular ln(m_{x,t}) e estimar a_x (média por linha)
+        ↓
+SVD da matriz centralizada → estimar b_x e k_t
+        ↓
+Ajustar ARIMA(0,1,0) com constante em k_t
+        ↓
+Projetar k_t para anos futuros
+        ↓
+Reconstruir m_{x,t} futuro: exp(a_x + b_x * k_t_futuro)
+```
 
 O preço dessa parcimônia está no $b_x$ ser fixo no tempo. Na prática, o padrão de ganho de longevidade migrou: no século XX a maior queda ocorreu na mortalidade infantil; nas últimas décadas ela se concentra em idades avançadas. Um $b_x$ estimado num período longo mistura esses regimes e pode subestimar ganhos em um grupo etário específico. Isso motivou as extensões que vêm a seguir.
 
