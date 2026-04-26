@@ -145,14 +145,7 @@ display(df.head())
 
 Seguindo o protocolo do @sec-cap02, realizamos o particionamento temporal mantendo a ordem cronológica. Utilizaremos 80% para treino (1950–2005) e 20% para teste (2006–2020), resultando em 15 anos de previsão out-of-sample — um horizonte realisticamente desafiador para planejamento previdenciário.
 
-```python
-train_size = int(len(df) * 0.8)   # 1950–2005
-train = df.iloc[:train_size]
-test  = df.iloc[train_size:]       # 2006–2020
-```
-
 ### Análise estatística da série temporal
-
 
 
 ```python
