@@ -53,7 +53,7 @@ $$
 \mathbf{a}^{[\ell]} = f^{[\ell]}(\mathbf{z}^{[\ell]})
 $$
 
-Onde $\mathbf{W}^{[\ell]} \in \mathbb{R}^{n^{[\ell]} \times n^{[\ell-1]}}$ é a matriz de pesos, $\mathbf{b}^{[\ell]} \in \mathbb{R}^{n^{[\ell]}}$ é o vetor de viéses, $\mathbf{a}^{[\ell-1]}$ são as ativações da camada anterior, e $f^{[\ell]}$ é a função de ativação.
+Onde $\mathbf{W}^{[\ell]} \in \mathbb{R}^{n^{[\ell]} \times n^{[\ell-1]}}$ é a matriz de pesos, $\mathbf{b}^{[\ell]} \in \mathbb{R}^{n^{[\ell]}}$ é o vetor de vieses, $\mathbf{a}^{[\ell-1]}$ são as ativações da camada anterior, e $f^{[\ell]}$ é a função de ativação.
 
 A **capacidade de aproximação universal** é o principal resultado teórico associado às MLPs: com pelo menos uma camada oculta e neurônios em quantidade suficiente, a rede pode aproximar qualquer função contínua em um domínio compacto com precisão arbitrária [@hornik1989multilayer; @cybenko1989approximation]. Mas é importante não romantizar esse teorema. Ele não diz quantos neurônios bastam em um problema concreto, nem assegura que o treinamento realmente encontrará uma boa solução.
 
@@ -71,7 +71,7 @@ $$
 \hat{y}_{t+h} = g(\mathbf{x}_t; \boldsymbol{\theta})
 $$
 
-Onde $g$ representa a rede neural com parâmetros $\boldsymbol{\theta}$ (todos os pesos e viéses). A escolha de $p$ (número de defasagens) é um hiperparâmetro crucial: valores pequenos subutilizam informação histórica; valores grandes aumentam a dimensionalidade e o risco de sobreajuste.
+Onde $g$ representa a rede neural com parâmetros $\boldsymbol{\theta}$ (todos os pesos e vieses). A escolha de $p$ (número de defasagens) é um hiperparâmetro crucial: valores pequenos subutilizam informação histórica; valores grandes aumentam a dimensionalidade e o risco de sobreajuste.
 
 Para previsão **multivariada** (múltiplas séries relacionadas) ou **multivariada no horizonte** (prever múltiplos passos simultaneamente), a camada de saída expande-se para múltiplos neurônios, cada um representando uma variável ou horizonte de interesse.
 
@@ -95,7 +95,7 @@ A **retropropagação** (*backpropagation*) é o procedimento que torna esse tre
 
 ### Regularização para Evitar Overfitting
 
-Redes neurais, especialmente com muitos parâmetros, são propenças a **sobreajuste** (*overfitting*): memorizam o ruído específico dos dados de treino em vez de aprender padrões generalizáveis. Estratégias de regularização são essenciais:
+Redes neurais, especialmente com muitos parâmetros, são propensas a **sobreajuste** (*overfitting*): memorizam o ruído específico dos dados de treino em vez de aprender padrões generalizáveis. Estratégias de regularização são essenciais:
 
 **Dropout**: durante o treinamento, uma fração aleatória de neurônios é "desligada" (sua ativação zerada) em cada iteração. Isso força a rede a desenvolver representações redundantes e robustas, prevenindo co-adaptação excessiva de neurônios [@srivastava2014dropout].
 
@@ -133,7 +133,7 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 # Simulação de dados de inflação brasileira (IPCA mensal)
-# Em produção: dados do IBGE/SIDRA
+# Em produção: dados do SGS/BCB (código 433)
 np.random.seed(42)
 meses = pd.date_range('2000-01-01', '2023-12-01', freq='MS')
 n = len(meses)
@@ -622,6 +622,7 @@ print(summary)
 
 ```python
 best_config = summary.index[0]  # configuração vencedora
+config_map = {name: layers for name, layers in configs}
 best_model = MLP_Flexible(X_train_tensor.shape[1],
                           config_map[best_config], dropout=0.2)
 
@@ -660,8 +661,8 @@ class MLP_Activation(nn.Module):
         }[activation]
 
     def forward(self, x):
-        return self.act(self.fc1(x))
-        x = self.act(self.fc2(x))   # aplica ReLU antes da saída
+        x = self.act(self.fc1(x))
+        x = self.act(self.fc2(x))
         return self.fc3(x).squeeze()
 ```
 
@@ -699,6 +700,10 @@ def sensitivity_analysis(model, X_test, n_lags=12):
         sensitivities.append(sens)
 
     return sensitivities
+# Usar o modelo e dados de teste do estudo de caso
+model_sens = modelo           # MLP treinada no estudo de caso
+X_test_ipca_t = X_test_tensor  # tensor de teste normalizado
+
 
 sensitivities = sensitivity_analysis(model_sens, X_test_ipca_t)
 importance_df = pd.DataFrame({
