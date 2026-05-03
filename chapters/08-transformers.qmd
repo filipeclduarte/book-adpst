@@ -1,30 +1,36 @@
 # Transformers para Séries Temporais: Mecanismos de Atenção {#sec-cap08}
 
-As redes recorrentes do Capítulo 6, embora poderosas, processam sequências iterativamente, limitando o paralelismo e dificultando a captura de dependências de muito longo prazo. A arquitetura **Transformer**, originalmente proposta para tradução automática [@vaswani2017attention], revolucionou o processamento de sequências ao substituir a recorrência por mecanismos de **atenção** (*attention*).
+As redes recorrentes do @sec-cap06, embora poderosas, processam sequências iterativamente, limitando o paralelismo e dificultando a captura de dependências de muito longo prazo. A arquitetura **Transformer**, originalmente proposta para tradução automática [@vaswani2017attention], revolucionou o processamento de sequências ao substituir a recorrência por mecanismos de **atenção** (*attention*).
 
 A inovação central é simples mas poderosa: em vez de comprimir toda a história em um estado oculto fixo, o modelo aprende a "atentar" seletivamente para diferentes partes da sequência de entrada quando produz cada elemento da saída. Isso permite dependências diretas entre posições distantes, independentemente de sua separação temporal, e possibilita processamento massivamente paralelizável durante o treinamento.
 
 Este capítulo apresenta o Transformer adaptado para séries temporais, com aplicação prática em previsão de taxas de mortalidade, seguindo o estudo de @wang2024timeseries que demonstra como a arquitetura original de Vaswani pode ser efetivamente aplicada a dados demográficos.
 
+::: {.callout-note}
+## Leituras para aprofundamento
+
+O Transformer original foi proposto em @vaswani2017attention. Para a aplicação em mortalidade, @wang2024timeseries é a referência central deste capítulo. Para uma visão crítica sobre Transformers em séries temporais, veja @zeng2023transformers. @benidis2022deep oferece um panorama atualizado da família de Deep Learning para *forecasting*.
+:::
+
 ## O Mecanismo de Atenção
 
 A operação fundamental de atenção mapeia uma consulta (*query*) e um conjunto de pares chave-valor (*key-value*) para uma saída. A saída é computada como uma soma ponderada dos valores, onde o peso atribuído a cada valor é determinado pela compatibilidade entre a consulta e a chave correspondente.
 
-### Atenção Escalada por Produto de Ponto
+### Atenção Escalada por Produto Escalar
 
-O Transformer utiliza **atenção multi-cabeça** (*multi-head attention*), onde múltiplas projeções paralelas permitem que o modelo atente para diferentes representações em diferentes posições. Para uma única "cabeça":
+O Transformer utiliza **atenção multi-cabeça** (*multi-head attention*), onde múltiplas projeções paralelas permitem que o modelo atente para diferentes representações em diferentes posições. Para uma única "cabeça", a **atenção escalada por produto escalar** (*scaled dot-product attention*) é definida como:
 
 $$
 \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}}\right)\mathbf{V}
 $$
 
-Onde $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$ são matrizes de *query*, *key* e *value*, respectivamente, e $d_k$ é a dimensionalidade das chaves. O fator de escala $\sqrt{d_k}$ evita que os produtos de ponto cresçam excessivamente em dimensionalidades altas, o que empurraria a função softmax para regiões de gradiente muito pequeno.
+Onde $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$ são matrizes de *query*, *key* e *value*, respectivamente, e $d_k$ é a dimensionalidade das chaves. O fator de escala $\sqrt{d_k}$ evita que os produtos de ponto cresçam excessivamente em dimensionalidades altas, o que levaria a função softmax para regiões de gradiente muito pequeno.
 
-A função softmax normaliza os pesos para que somem 1, criando uma distribuição de probabilidade sobre as posições a serem atentadas. Valores mais altos de compatibilidade entre *query* e *key* resultam em maiores pesos para o *value* correspondente.
+A função softmax normaliza os pesos de modo que sua soma seja igual a 1, criando uma distribuição de probabilidade sobre as posições a serem atentadas. Valores mais altos de compatibilidade entre *query* e *key* resultam em maiores pesos para o *value* correspondente.
 
 ### Atenção Multi-Cabeça
 
-Em vez de uma única função de atenção, o modelo projetada linearmente as consultas, chaves e valores $h$ vezes com projeções diferentes, executa atenção em paralelo em cada versão projetada, e concatena os resultados:
+Em vez de uma única função de atenção, o modelo projeta linearmente as consultas, chaves e valores $h$ vezes com projeções diferentes, executa atenção em paralelo em cada versão projetada, e concatena os resultados:
 
 $$
 \text{MultiHead}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h)\mathbf{W}^O
@@ -34,9 +40,9 @@ $$
 \text{head}_i = \text{Attention}(\mathbf{Q}\mathbf{W}_i^Q, \mathbf{K}\mathbf{W}_i^K, \mathbf{V}\mathbf{W}_i^V)
 $$
 
-Diferentes cabeças podem aprender diferentes tipos de dependências — uma pode focar em padrões sazonais de curto prazo, outra em tendências de longo prazo, outra em comportamento recente. A @fig-attention-mechanism ilustra o mecanismo de atenção escalar por produto de ponto.
+Diferentes cabeças podem aprender diferentes tipos de dependências — uma pode focar em padrões sazonais de curto prazo, outra em tendências de longo prazo, outra em comportamento recente. A @fig-attention-mechanism ilustra o mecanismo de atenção escalada por produto escalar.
 
-![Mecanismo de atenção escalar por produto de ponto. As entradas Query (Q), Key (K) e Value (V) são projetadas linearmente a partir da sequência de entrada. Q e K são multiplicadas para obter scores de compatibilidade, escaladas por $\sqrt{d_k}$, normalizadas via softmax (produzindo pesos de atenção), e então combinadas com V em uma multiplicação final que gera o output Z. O fluxo segue da esquerda para a direita, de forma totalmente paralelizável. A equação no rodapé formaliza toda a operação.](../images/fig-attention-mechanism.png){#fig-attention-mechanism width=95%}
+![Mecanismo de atenção escalada por produto escalar. As entradas Query (Q), Key (K) e Value (V) são projetadas linearmente a partir da sequência de entrada. Q e K são multiplicadas para obter scores de compatibilidade, escaladas por $\sqrt{d_k}$, normalizadas via softmax (produzindo pesos de atenção), e então combinadas com V em uma multiplicação final que gera o output Z. O fluxo segue da esquerda para a direita, de forma totalmente paralelizável. A equação no rodapé formaliza toda a operação.](../images/fig-attention-mechanism.png){#fig-attention-mechanism width=95%}
 
 ## Arquitetura Transformer para Séries Temporais
 
@@ -122,7 +128,7 @@ print(f"Dispositivo: {device}")
 
 # Carregamento do painel pré-processado, versionado no repositório do livro
 # Exemplo de URL para uso no Colab:
-# BASE = "https://raw.githubusercontent.com/filipeduarte/book-project/main/data"
+# BASE = "https://raw.githubusercontent.com/filipeclduarte/book-adpst/main/data"
 # df_hmd = pd.read_csv(f"{BASE}/hmd_multipop_mx.csv")
 df_hmd = pd.read_csv("data/hmd_multipop_mx.csv")
 
@@ -329,7 +335,7 @@ modelo = TransformerMortality(
     d_model=32,           # Embedding dimension
     nhead=2,              # Attention heads
     num_layers=1,         # Camadas encoder
-    dim_feedforward=16,   # Hidden size FFN
+    dim_feedforward=64,   # Hidden size FFN
     dropout=0.1
 ).to(device)
 
@@ -577,7 +583,7 @@ Para o atuário e demógrafo, o Transformer oferece uma ferramenta adicional no 
 - Dados históricos longos e de alta qualidade estão disponíveis
 - Previsões de curto a médio prazo são necessárias
 - Recursos computacionais estão disponíveis
-- A marginal de ganho de precisão justifica a complexidade adicional
+- O ganho marginal de precisão justifica a complexidade adicional
 
 Entretanto, para aplicações em que a interpretabilidade pesa mais, ou em que os dados são limitados, o Lee-Carter e suas extensões continuam sendo ferramentas robustas e adequadas. A escolha entre abordagens deve ser guiada por validação empírica rigorosa, conforme os protocolos do @sec-cap02.
 
@@ -599,4 +605,4 @@ Discuta criticamente a afirmação: "O sucesso do Transformer em NLP não se tra
 
 ### Nota sobre as Resoluções
 
-As resoluções completas dos exercícios deste capítulo estão disponíveis em notebooks Python no repositório oficial do livro no GitHub (`github.com/filipeduarte/book-project`). Cada notebook inclui código executável, visualizações e discussões detalhadas das soluções, permitindo que o leitor execute os exercícios no Google Colab e compare suas implementações com as propostas. Para a base de mortalidade, o fluxo principal usa os arquivos versionados do repositório; a importação bruta da HMD pode ser oferecida como bloco opcional em R no próprio notebook.
+As resoluções completas dos exercícios deste capítulo estão disponíveis em notebooks Python no repositório oficial do livro no GitHub (`https://github.com/filipeclduarte/book-adpst`). Cada notebook inclui código executável, visualizações e discussões detalhadas das soluções, permitindo que o leitor execute os exercícios no Google Colab e compare suas implementações com as propostas. Para a base de mortalidade, o fluxo principal usa os arquivos versionados do repositório; a importação bruta da HMD pode ser oferecida como bloco opcional em R no próprio notebook.

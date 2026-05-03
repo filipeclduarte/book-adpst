@@ -7,14 +7,14 @@ As redes convolucionais ficaram famosas em visão computacional, mas sua utilida
 
 ::: {.callout-note}
 ## Leituras para aprofundamento
-O tratamento deste capítulo é aplicado e didático. Para o arcabouço formal de convoluções em aprendizado profundo, o texto padrão é o capítulo 9 de *Deep Learning* de Goodfellow, Bengio e Courville. Para a especialização em sequências, @bai2018empirical é referência essencial, e @oord2016wavenet introduz a arquitetura WaveNet, que inaugurou o uso de convoluções dilatadas em larga escala.
+O tratamento deste capítulo é aplicado e didático. Para o arcabouço formal de convoluções em aprendizado profundo, o texto padrão é o capítulo 9 de *Deep Learning* [@goodfellow2016deep]. Para a especialização em sequências, @bai2018empirical é referência essencial, e @oord2016wavenet introduz a arquitetura WaveNet, que inaugurou o uso de convoluções dilatadas em larga escala.
 :::
 
 ## Por que convoluções em séries temporais
 
 Quem chega a este capítulo já encontrou, no Capítulo 6, as **redes recorrentes** --- LSTM e GRU --- como resposta natural para dados sequenciais. A intuição é convincente: se os dados chegam no tempo um ponto após o outro, parece razoável que o modelo também os processe nessa ordem, carregando uma memória do que veio antes. Durante muito tempo, essa foi a solução dominante, tanto em linguagem quanto em previsão temporal [@hochreiter1997long].
 
-Mas, a partir de meados da década de 2010, convoluções começaram a aparecer como alternativa séria. É importante fazer uma distinção logo de saída: **uma convolução simples aprende sobretudo padrões locais**. Sozinha, ela enxerga apenas a vizinhança coberta pelo kernel. O ganho em dependências longas não vem da operação isolada, mas da forma como ela é organizada em arquiteturas profundas, causais e dilatadas. A mudança foi motivada por três vantagens muito concretas. A primeira é **paralelismo**: enquanto RNNs avançam passo a passo, convoluções processam a sequência inteira de uma vez, explorando muito melhor GPUs e TPUs. A segunda é **estabilidade**: recorrentes longas sofrem com gradientes que desaparecem ou explodem, ao passo que convoluções constroem caminhos computacionais mais curtos e, por isso, tendem a treinar de forma mais estável. A terceira é **controle do campo receptivo**: em uma arquitetura convolucional, conseguimos enxergar com mais clareza até onde o passado influencia cada previsão, o que torna o modelo menos opaco e mais fácil de depurar.
+Mas, a partir de meados da década de 2010, convoluções começaram a aparecer como alternativa séria. É importante fazer uma distinção logo de saída: **uma convolução simples aprende sobretudo padrões locais**. Sozinha, ela enxerga apenas a vizinhança coberta pelo kernel. O ganho em dependências longas não vem da operação isolada, mas da forma como ela é organizada em arquiteturas profundas, causais e dilatadas. A mudança foi motivada por três vantagens muito concretas. A primeira é **paralelismo**: enquanto RNNs avançam passo a passo, convoluções processam a sequência inteira de uma vez, explorando com muito mais eficiência GPUs e TPUs. A segunda é **estabilidade**: recorrentes longas sofrem com gradientes que desaparecem ou explodem, ao passo que convoluções constroem caminhos computacionais mais curtos e, por isso, tendem a treinar de forma mais estável. A terceira é **controle do campo receptivo**: em uma arquitetura convolucional, conseguimos enxergar com mais clareza até onde o passado influencia cada previsão, o que torna o modelo menos opaco e mais fácil de depurar.
 
 A conclusão de @bai2018empirical, em um estudo experimental amplo, resume a mudança: "*arquiteturas convolucionais genéricas superam redes recorrentes em uma ampla gama de tarefas sequenciais*". Essa afirmação não implica que convoluções sejam sempre superiores --- o Capítulo 8 mostrará cenários em que *Transformers* fazem melhor --- mas estabelece que, como *baseline* neural sério para séries temporais, convoluções merecem seu lugar.
 
@@ -48,7 +48,7 @@ onde $b_c$ é um viés por canal. Cada filtro aprende, em princípio, a detectar
 
 ## Convolução causal: respeitando a flecha do tempo
 
-A fórmula acima apresenta um problema sutil mas decisivo quando aplicada a séries temporais. Se $t$ está próximo do fim da série, o somatório $\sum_{i=0}^{k-1} w_i\, x_{t-i}$ está correto. Se, porém, construímos a saída de forma "centrada" --- como faz a convolução padrão em processamento de imagens --- o elemento $y_t$ dependeria de valores $x_{t+1}, x_{t+2}, \ldots$, isto é, **do futuro**. Para uma convolução aplicada a imagens, isso é irrelevante: um *pixel* não tem "passado" ou "futuro". Para séries temporais, é inadmissível: viola-se a flecha do tempo, e qualquer modelo treinado assim apresentará desempenho fraudulento no passado e catastrófico no futuro real.
+A fórmula acima apresenta um problema sutil mas decisivo quando aplicada a séries temporais. Se $t$ está próximo do fim da série, o somatório $\sum_{i=0}^{k-1} w_i\, x_{t-i}$ está correto. Se, porém, construirmos a saída de forma "centrada" --- como faz a convolução padrão em processamento de imagens --- o elemento $y_t$ dependeria de valores $x_{t+1}, x_{t+2}, \ldots$, isto é, **do futuro**. Para uma convolução aplicada a imagens, isso é irrelevante: um *pixel* não tem "passado" ou "futuro". Para séries temporais, é inadmissível: viola-se a flecha do tempo, e qualquer modelo treinado assim apresentará desempenho fraudulento no passado e catastrófico no futuro real.
 
 A solução é simples, mas essencial: **convolução causal**. Dizemos que a convolução é causal quando $y_t$ depende apenas de $x_t, x_{t-1}, \ldots, x_{t-k+1}$, jamais de observações futuras. Na prática, isso se implementa com *padding* assimétrico: adicionam-se $(k-1)$ zeros apenas no início da sequência. A @fig-causal-convolution ilustra a diferença entre uma convolução padrão e uma convolução causal, com $k = 3$:
 
@@ -108,7 +108,7 @@ $$
 R = (k - 1) \cdot (2^L - 1) + 1,
 $$
 
-que cresce **exponencialmente** em $L$. Para $k = 3$ e $L = 8$ camadas, $R = 2 \cdot 255 + 1 = 511$: meio milhar de passos de contexto com apenas oito camadas e $8 \cdot 3 = 24$ pesos por canal. O diagrama abaixo, inspirado em @oord2016wavenet, ilustra a estrutura de campos receptivos para $k = 2$ e quatro camadas com $d \in \{1, 2, 4, 8\}$:
+que cresce **exponencialmente** em $L$. Para $k = 3$ e $L = 8$ camadas, $R = 2 \cdot 255 + 1 = 511$: quinhentos passos de contexto com apenas oito camadas e $8 \cdot 3 = 24$ pesos por canal. O diagrama abaixo, inspirado em @oord2016wavenet, ilustra a estrutura de campos receptivos para $k = 2$ e quatro camadas com $d \in \{1, 2, 4, 8\}$:
 
 ```
 Camada 4 (d=8):   ●─────────────────●
@@ -203,7 +203,7 @@ Uma regra prática útil, alinhada a @bai2018empirical, é a seguinte: quando a 
 
 ## Lições e prática recomendada
 
-Três lições resumem bem o capítulo. A primeira é que **causalidade não é detalhe técnico**: em previsão temporal, qualquer atalho que deixe o futuro vazar para o passado destrói a validade do experimento. A segunda é que **dilatação é o mecanismo que torna a convolução realmente poderosa em séries temporais**: sem ela, o alcance da rede cresce devagar demais; com ela, poucas camadas já bastam para cobrir horizontes extensos. A terceira é que **conexões residuais não são enfeite arquitetural**. Elas são parte do que torna essas redes treináveis em profundidade.
+Três lições resumem bem o capítulo. A primeira é que **causalidade não é detalhe técnico**: em previsão temporal, qualquer atalho que deixe o futuro se infiltrar no passado destrói a validade do experimento. A segunda é que **dilatação é o mecanismo que torna a convolução realmente poderosa em séries temporais**: sem ela, o alcance da rede cresce devagar demais; com ela, poucas camadas já bastam para cobrir horizontes extensos. A terceira é que **conexões residuais não são enfeite arquitetural**. Elas são parte do que torna essas redes treináveis em profundidade.
 
 Em aplicações de ciências sociais --- previsão do IPCA, projeções demográficas, mortalidade, emprego --- uma TCN com 6 a 10 camadas, filtros de tamanho 3, dilatações em progressão geométrica e *dropout* entre 0,1 e 0,3 costuma ser um ponto de partida bastante razoável. Depois disso, o ajuste fino deve seguir duas perguntas simples: quanto passado o modelo precisa enxergar e quantos parâmetros os dados realmente conseguem sustentar.
 
@@ -234,7 +234,7 @@ T_CORTE = 2000  # teste: 2000-2019
 
 # Carga do painel pré-processado, versionado no repositório do livro
 # Exemplo de URL para uso no Colab:
-# BASE = "https://raw.githubusercontent.com/filipeduarte/book-project/main/data"
+# BASE = "https://raw.githubusercontent.com/filipeclduarte/book-adpst/main/data"
 # df_hmd = pd.read_csv(f"{BASE}/hmd_multipop_mx.csv")
 df_hmd = pd.read_csv("data/hmd_multipop_mx.csv")
 
@@ -292,6 +292,12 @@ def prever_rw_idade(X_train_pop, h):
 O modelo CBD, por ser específico para idades avançadas, é aplicado apenas ao recorte 60--99 e descartado fora dele.
 
 ### CNN temporal
+
+::: {.callout-warning}
+## Uso pedagógico — não utilizar em previsão real
+
+A CNN abaixo usa `padding=kernel-1` (simétrico), o que permite que a convolução acesse valores futuros durante o treino. Esta arquitetura é mantida aqui para fins didáticos — o contraste com a TCN causal evidencia o quanto a causalidade importa. Em qualquer aplicação real de previsão, utilize convoluções causais com padding assimétrico à esquerda.
+:::
 
 A primeira rede neural é uma CNN em estilo *encoder*. Cada combinação população-sexo entra como um exemplo independente, as cem idades funcionam como canais e o tempo é o eixo de convolução. A saída prevê, para cada idade, a log-taxa no próximo passo; para horizontes maiores, usamos realimentação recursiva.
 
@@ -360,6 +366,9 @@ A convolução percorre o eixo etário com kernel 5, permitindo ao modelo aprend
 Todos os modelos neurais são treinados com Adam (lr = $10^{-3}$), *batch size* 32, 200 épocas, *early stopping* via validação nos últimos cinco anos do treino. O horizonte de teste é projetado recursivamente: cada previsão anual realimenta a janela de entrada do próximo passo.
 
 ```python
+# Para reprodutibilidade, fixe a semente antes do treino:
+# torch.manual_seed(42); np.random.seed(42)
+
 def treinar(modelo, loader, epocas=200, lr=1e-3):
     opt = torch.optim.Adam(modelo.parameters(), lr=lr)
     for _ in range(epocas):
@@ -410,10 +419,12 @@ O MAE agregado esconde uma dinâmica crítica para aplicações atuariais: a deg
 | 2015 | 0,221 | 0,160 | 0,150 | 0,122 | 0,103 |
 | 2019 | 0,258 | 0,181 | 0,170 | 0,137 | 0,112 |
 
-O padrão é claro: todos os modelos pioram com o horizonte, como seria de esperar em projeções recursivas, mas não pioram na mesma velocidade. O RW se deteriora rapidamente porque não carrega nenhuma estrutura demográfica além da persistência imediata. O Lee-Carter resiste melhor. A LCConv, por sua vez, degrada menos porque aprende regularidades compartilhadas entre países --- como a queda continuada da mortalidade e a compressão em idades avançadas --- que um modelo treinado população a população tende a subaproveitar.
+O padrão é claro: todos os modelos pioram com o horizonte, como seria de esperar em projeções recursivas, mas não pioram na mesma velocidade. O RW se deteriora rapidamente porque não carrega nenhuma estrutura demográfica além da persistência imediata. O Lee-Carter resiste melhor. A LCConv, por sua vez, degrada menos porque aprende regularidades compartilhadas entre países --- como a queda continuada da mortalidade e a compressão em idades avançadas --- que um modelo treinado população a população tende a subutilizar.
 
 ```python
+#| eval: false
 # Reprodução do painel de evolução anual
+# ATENÇÃO: as variáveis pred_rw, pred_lc, etc. são calculadas no notebook de soluções
 def mae_por_ano(pred, real):
     return np.mean(np.abs(pred - real), axis=(0, 1))  # média sobre pops×idades
 
@@ -458,4 +469,4 @@ Implemente uma arquitetura híbrida CNN-LSTM: camadas convolucionais para extrai
 
 ### Nota sobre as Resoluções
 
-As resoluções completas dos exercícios deste capítulo estão disponíveis em notebooks Python no repositório oficial do livro no GitHub (`github.com/filipeduarte/book-project`). Cada notebook inclui código executável, visualizações e discussões detalhadas das soluções, permitindo que o leitor execute os exercícios no Google Colab e compare suas implementações com as propostas.
+As resoluções completas dos exercícios deste capítulo estão disponíveis em notebooks Python no repositório oficial do livro no GitHub (`https://github.com/filipeclduarte/book-adpst`). Cada notebook inclui código executável, visualizações e discussões detalhadas das soluções, permitindo que o leitor execute os exercícios no Google Colab e compare suas implementações com as propostas.

@@ -9,7 +9,7 @@ Este capítulo percorre essa família de modelos com um olhar aplicado. Começam
 ::: {.callout-note}
 ## Leituras para aprofundamento
 
-Para uma derivação completa dos gradientes através do tempo (*backpropagation through time*) e das células LSTM/GRU, consulte @goodfellow2016deep (capítulo 10). @hochreiter1997long é o artigo fundacional da LSTM e permanece uma leitura acessível. @cho2014learning introduz a GRU no contexto de tradução automática, e @chung2014empirical oferece a comparação empírica clássica entre as duas arquiteturas. Para o estado da arte em *forecasting* com recorrentes, @salinas2020deepar apresenta o DeepAR e @benidis2022deep situa a família recorrente no panorama atual das Deep Learning para séries temporais.
+Para uma derivação completa dos gradientes através do tempo (*backpropagation through time*) e das células LSTM/GRU, consulte @goodfellow2016deep (capítulo 10). @hochreiter1997long é o artigo seminal da LSTM e permanece uma leitura acessível. @cho2014learning introduz a GRU no contexto de tradução automática, e @chung2014empirical oferece a comparação empírica clássica entre as duas arquiteturas.
 :::
 
 ## A Arquitetura Recorrente Básica
@@ -110,7 +110,7 @@ Com apenas duas portas em vez de três, a GRU possui menos parâmetros e é comp
 
 ## Estudo de Caso: Previsão de Câmbio com LSTM e GRU
 
-Implementamos uma comparação sistemática entre MLP, LSTM e GRU para prever a taxa de câmbio BRL/USD, uma série financeira de frequência diária com dinâmicas complexas --- volatilidade condicional, *jumps* em períodos de crise e memória de longo prazo em segundos momentos. Em produção, a série real é obtida do SGS/BCB (código 1, taxa de câmbio comercial) via `python-bcb`, conforme o fluxo apresentado no @sec-cap01. Para reprodutibilidade didática, o bloco de preparação utiliza uma simulação que preserva as propriedades estilizadas do BRL/USD --- *random walk* com *drift*, heterocedasticidade condicional e limites superiores e inferiores realistas.
+Implementamos uma comparação sistemática entre MLP, LSTM e GRU para prever a taxa de câmbio BRL/USD, uma série financeira de frequência diária com dinâmicas complexas --- volatilidade condicional, *jumps* em períodos de crise e memória de longo prazo na variância. Em produção, a série real é obtida do SGS/BCB (código 1, taxa de câmbio comercial) via `python-bcb`, conforme o fluxo apresentado no @sec-cap01. Para reprodutibilidade didática, o bloco de preparação utiliza uma simulação que preserva as propriedades estilizadas do BRL/USD --- *random walk* com *drift*, heterocedasticidade condicional e limites superiores e inferiores realistas.
 
 ### Preparação dos Dados
 
@@ -182,6 +182,21 @@ plt.tight_layout()
 plt.show()
 ```
 
+::: {.callout-tip}
+## Substituindo pela série real
+
+Para usar a série oficial do BCB, substitua o bloco de simulação por:
+
+```python
+# Dados reais do SGS/BCB (código 1, câmbio comercial)
+from bcb import sgs
+cambio_real = sgs.get(1, start='2018-01-01', end='2023-12-31')
+df = cambio_real.rename(columns={1: 'cambio'})
+```
+
+O restante do pipeline (criação de sequências, normalização, treinamento) permanece idêntico.
+:::
+
 ### Criação de Sequências Temporais
 
 ```python
@@ -244,10 +259,10 @@ y_test_tensor = torch.FloatTensor(y_test_scaled).to(device)
 ```python
 class MLP_Seq2Seq(nn.Module):
     """
-    MLP baseline para comparação (apenas último timestep)
+    MLP baseline para comparação (todos os timesteps achatados)
     """
     def __init__(self, input_size, hidden_size=[64, 32], output_size=5, dropout=0.2):
-        super(MLP_Seq2Seq, self).__init__()
+        super().__init__()
         
         layers = []
         prev_size = input_size
@@ -261,8 +276,8 @@ class MLP_Seq2Seq(nn.Module):
         self.output = nn.Linear(prev_size, output_size)
         
     def forward(self, x):
-        # x: (batch, timesteps, features) -> usar apenas último timestep
-        x = x[:, -1, :]  # (batch, features)
+        # x: (batch, timesteps, features) -> achatar todos os timesteps
+        x = x.reshape(x.size(0), -1)  # (batch, timesteps * features)
         x = self.hidden(x)
         return self.output(x)
 
@@ -273,7 +288,7 @@ class LSTM_Model(nn.Module):
     """
     def __init__(self, input_size, hidden_size=64, num_layers=2, 
                  output_size=5, dropout=0.2):
-        super(LSTM_Model, self).__init__()
+        super().__init__()
         
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -307,7 +322,7 @@ class GRU_Model(nn.Module):
     """
     def __init__(self, input_size, hidden_size=64, num_layers=2, 
                  output_size=5, dropout=0.2):
-        super(GRU_Model, self).__init__()
+        super().__init__()
         
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -545,7 +560,6 @@ for i, (modelo, row) in enumerate(ranking.iterrows(), 1):
 ```python
 # Visualizar previsões para um período específico do teste
 idx_exemplo = 100  # Índice no conjunto de teste
-n_amostras = 50    # Quantos pontos mostrar
 
 # Dados históricos (últimos N_LAGS dias antes da previsão)
 idx_inicio_hist = train_size + idx_exemplo
@@ -570,11 +584,11 @@ plt.plot(futuro_datas,
          'ko', label='Observado', markersize=8)
 
 # Plotar previsões de cada modelo
-colores = {'MLP': 'blue', 'LSTM': 'red', 'GRU': 'green'}
+estilos = {'MLP': 'b--', 'LSTM': 'r--', 'GRU': 'g--'}
 for nome in modelos.keys():
     plt.plot(futuro_datas, 
              resultados_teste[nome]['pred'][idx_exemplo],
-             f'{colores[nome][0]}--', 
+             estilos[nome], 
              label=f'{nome} (previsto)', 
              linewidth=2, marker='s', markersize=6)
 
@@ -607,11 +621,17 @@ print("\nInterpretação: Menor degradação indica melhor capacidade de memóri
 
 Este capítulo apresentou as redes recorrentes como uma resposta direta às limitações das *feedforward* quando a ordem temporal importa de forma mais profunda. LSTM e GRU não são apenas variações incrementais da RNN clássica; elas reorganizam o fluxo de informação para que a memória da rede permaneça utilizável ao longo de sequências mais longas.
 
-Do estudo de caso com câmbio BRL/USD emergem quatro lições práticas. A primeira é que **LSTM e GRU tendem a levar vantagem sobre MLPs** quando a série exige memória temporal mais rica, especialmente em horizontes maiores. A segunda é que **a diferença entre LSTM e GRU costuma ser pequena**; em muitos cenários, a GRU entrega desempenho parecido com menos parâmetros e menor custo computacional, em linha com @chung2014empirical. A terceira é que **a perda de precisão com o aumento do horizonte não desaparece**. Mesmo arquiteturas mais sofisticadas continuam limitadas pela incerteza genuína do processo gerador, algo particularmente forte em séries financeiras. A quarta é operacional: **regularização continua sendo decisiva**. Em recorrentes, *dropout*, *weight decay* e *early stopping* deixam de ser refinamentos e passam a fazer parte do mínimo metodológico.
+Do estudo de caso com câmbio BRL/USD emergem quatro lições práticas. A primeira é que **LSTM e GRU tendem a levar vantagem sobre MLPs** quando a série exige memória temporal mais rica, especialmente em horizontes maiores. A segunda é que **a diferença entre LSTM e GRU costuma ser pequena**; em muitos cenários, a GRU entrega desempenho parecido com menos parâmetros e menor custo computacional, em linha com @chung2014empirical. A terceira é que **a perda de precisão com o aumento do horizonte não desaparece**. Mesmo arquiteturas mais sofisticadas continuam limitadas pela incerteza genuína do processo gerador, algo particularmente forte em séries financeiras. A quarta é operacional: **regularização continua sendo decisiva**. Em recorrentes, *dropout*, *weight decay* e *early stopping* deixam de ser refinamentos e passam a fazer parte do mínimo metodológico. Para um panorama atualizado da família de Deep Learning aplicada a *forecasting*, consulte @benidis2022deep; o DeepAR de @salinas2020deepar é uma referência importante para modelos recorrentes probabilísticos em escala.
 
 O próximo capítulo explora as **Redes Convolucionais Temporais** (*Temporal Convolutional Networks*), uma alternativa que troca recorrência por convoluções causais dilatadas. A comparação é instrutiva: sai a memória implícita e adaptativa das LSTM/GRU, entra um campo receptivo explicitamente controlado e, em geral, mais fácil de paralelizar no treino.
 
 ## Soluções dos Exercícios
+
+::: {.callout-warning}
+## Sincronização com notebooks
+
+As soluções abaixo também estão disponíveis no notebook `notebooks/cap06-redes-recorrentes-solucoes.ipynb`. Ao modificar o código em um dos arquivos, atualize o outro para manter a consistência.
+:::
 
 ### Solução 6.1 — LSTM com Diferentes Tamanhos de Janela
 
@@ -630,7 +650,7 @@ class LSTM_Model(nn.Module):
 
     def forward(self, x):
         lstm_out, _ = self.lstm(x)
-        return self.fc(lstm_out[:, -1, :]).squeeze()
+        return self.fc(lstm_out[:, -1, :])
 
 def create_sequences(data, n_lags, horizon=5):
     X, y = [], []
@@ -793,4 +813,4 @@ Implemente uma arquitetura empilhada (*stacked*) LSTM com 1, 2 e 3 camadas. Aval
 
 ### Nota sobre as Resoluções
 
-As resoluções completas dos exercícios deste capítulo estão disponíveis em notebooks Python no repositório oficial do livro no GitHub (`github.com/filipeduarte/book-project`). Cada notebook inclui código executável, visualizações e discussões detalhadas das soluções, permitindo que o leitor execute os exercícios no Google Colab e compare suas implementações com as propostas.
+As resoluções completas dos exercícios deste capítulo estão disponíveis em notebooks Python no repositório oficial do livro no GitHub (`https://github.com/filipeclduarte/book-adpst`). Cada notebook inclui código executável, visualizações e discussões detalhadas das soluções, permitindo que o leitor execute os exercícios no Google Colab e compare suas implementações com as propostas.
